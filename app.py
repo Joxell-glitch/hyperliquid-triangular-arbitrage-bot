@@ -1,5 +1,4 @@
 import os
-import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -30,7 +29,6 @@ TWILIO_WHATSAPP_FROM = get_secret_value(
     "TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886"
 )
 
-BLOCKCHAIR_BASE_URL = "https://api.blockchair.com"
 SUPPORTED_ASSETS = {
     "BTC": {"chain": "bitcoin"},
     "ETH": {"chain": "ethereum"},
@@ -41,13 +39,6 @@ SUPER_WHALE_THRESHOLD = 10_000_000
 VOLUME_SPIKE_THRESHOLD = 50_000_000
 ACTIVITY_SPIKE_COUNT = 5
 PATTERN_WINDOW_MINUTES = 30
-
-
-class BlockchairAPIError(RuntimeError):
-    def __init__(self, message: str, status_code: Optional[int] = None):
-        super().__init__(message)
-        self.status_code = status_code
-
 # Configurazione lingua default e supportate
 if "lang" not in st.session_state:
     st.session_state.lang = "it"
@@ -139,6 +130,12 @@ TEXT = {
 }
 
 
+BLOCKCHAIR_CHAINS = ["bitcoin", "ethereum"]
+BLOCKCHAIR_STATUS: Dict[str, Dict[str, Optional[str]]] = {
+    chain: {"status": "ok", "error": None} for chain in BLOCKCHAIR_CHAINS
+}
+
+
 def format_minutes(seconds: int) -> str:
     minutes = seconds / 60
     if minutes.is_integer():
@@ -150,114 +147,104 @@ def format_usd(value: float) -> str:
     return f"${value:,.0f}"
 
 
-def fetch_blockchair_transactions(asset_symbol: str, chain: str, limit: int = 100) -> pd.DataFrame:
-    url = f"{BLOCKCHAIR_BASE_URL}/{chain}/transactions"
-    params = {"limit": limit}
-    attempts = 2
-    response = None
-    for attempt in range(attempts):
-        try:
-            response = requests.get(url, params=params, timeout=10)
-            break
-        except requests.exceptions.RequestException as exc:
-            if attempt == attempts - 1:
-                raise BlockchairAPIError(f"{chain}: {exc}") from exc
-            time.sleep(1)
-    if response is None:
-        raise BlockchairAPIError(f"{chain}: no response from Blockchair")
+def fetch_blockchair_transactions(chain: str, limit: int = 100) -> pd.DataFrame:
+    """
+    Scarica le ultime `limit` transazioni per la chain indicata ("bitcoin" o "ethereum")
+    usando Blockchair FREE API e restituisce un DataFrame con colonne:
+    - chain: "BTC" oppure "ETH"
+    - time: datetime UTC
+    - tx_hash: stringa hash
+    - value_usd: float (se disponibile, altrimenti 0)
+    - link_explorer: URL alla pagina Blockchair della transazione
+    In caso di errore ritorna un DataFrame vuoto.
+    """
 
-    if response.status_code != 200:
-        error_message = ""
-        try:
-            error_payload = response.json()
-            if isinstance(error_payload, dict):
-                error_message = (
-                    error_payload.get("context")
-                    or error_payload.get("error")
-                    or error_payload.get("message")
-                    or ""
-                )
-        except ValueError:
-            error_message = response.text[:200]
-        error_message = (error_message or "Unexpected response").strip()
-        raise BlockchairAPIError(error_message, status_code=response.status_code)
+    base_url = f"https://api.blockchair.com/{chain}/transactions"
+    params = {"limit": limit}
 
     try:
-        payload = response.json()
-    except ValueError as exc:
-        raise BlockchairAPIError("Invalid JSON response from Blockchair") from exc
+        resp = requests.get(base_url, params=params, timeout=10)
+        resp.raise_for_status()
+    except Exception as exc:
+        BLOCKCHAIR_STATUS[chain] = {"status": "error", "error": str(exc)}
+        return pd.DataFrame()
 
-    data_section = payload.get("data", [])
-    if isinstance(data_section, dict):
-        tx_list = data_section.get("transactions", [])
-    else:
-        tx_list = data_section or []
-    if not isinstance(tx_list, list):
-        tx_list = []
+    try:
+        data = resp.json()
+    except Exception as exc:
+        BLOCKCHAIR_STATUS[chain] = {"status": "error", "error": str(exc)}
+        return pd.DataFrame()
+
+    BLOCKCHAIR_STATUS[chain] = {"status": "ok", "error": None}
+    data_section = data.get("data")
+    if not data_section:
+        return pd.DataFrame()
 
     rows = []
-    for tx in tx_list:
+    if isinstance(data_section, dict):
+        tx_iterable = data_section.get("transactions", [])
+    else:
+        tx_iterable = data_section
+
+    for tx in tx_iterable:
         if not isinstance(tx, dict):
             continue
-        tx_hash = tx.get("hash")
+        tx_hash = tx.get("transaction_hash") or tx.get("hash")
         if not tx_hash:
             continue
-        time_value = tx.get("time")
+        t = tx.get("time") or tx.get("transaction_time")
+        if not t:
+            continue
         try:
-            tx_time = pd.to_datetime(time_value, utc=True)
+            dt = pd.to_datetime(t, utc=True)
         except Exception:
             continue
-        input_total = float(tx.get("input_total") or 0)
-        output_total = float(tx.get("output_total") or 0)
-        input_total_usd = float(tx.get("input_total_usd") or 0)
-        output_total_usd = float(tx.get("output_total_usd") or 0)
-        value_native = max(input_total, output_total)
-        value_usd = max(input_total_usd, output_total_usd)
+
+        val_usd = tx.get("value_usd", 0) or 0
+        try:
+            value_usd = float(val_usd)
+        except Exception:
+            value_usd = 0.0
+        chain_symbol = (
+            "BTC"
+            if chain == "bitcoin"
+            else ("ETH" if chain == "ethereum" else chain.upper())
+        )
+        link = f"https://blockchair.com/{chain}/transaction/{tx_hash}" if tx_hash else ""
+
         rows.append(
             {
-                "asset": asset_symbol,
-                "chain": chain,
-                "time": tx_time,
+                "chain": chain_symbol,
+                "time": dt,
                 "tx_hash": tx_hash,
-                "value_native": value_native,
                 "value_usd": value_usd,
-                "is_coinbase": bool(tx.get("is_coinbase", False)),
-                "link_explorer": f"https://blockchair.com/{chain}/transaction/{tx_hash}",
+                "link_explorer": link,
             }
         )
+
+    if not rows:
+        return pd.DataFrame()
+
     df = pd.DataFrame(rows)
+    df = df.sort_values("time", ascending=False).reset_index(drop=True)
+    return df
+
+
+def load_whale_transactions(min_value_usd: float) -> pd.DataFrame:
+    df_btc = fetch_blockchair_transactions("bitcoin", limit=200)
+    df_eth = fetch_blockchair_transactions("ethereum", limit=200)
+
+    frames = [df for df in [df_btc, df_eth] if not df.empty]
+    if not frames:
+        return pd.DataFrame()
+
+    df = pd.concat(frames, ignore_index=True)
+    df = df[df["value_usd"] >= float(min_value_usd)]
     if df.empty:
         return df
-    return df.sort_values("time", ascending=False).reset_index(drop=True)
-
-
-def load_whale_transactions(min_value_usd: float = MIN_VALUE_USD):
-    frames = []
-    for asset_symbol, meta in SUPPORTED_ASSETS.items():
-        try:
-            df_chain = fetch_blockchair_transactions(asset_symbol, meta["chain"], limit=100)
-        except BlockchairAPIError as exc:
-            return None, min_value_usd, {"status_code": exc.status_code, "message": str(exc)}
-        except Exception as exc:
-            return None, min_value_usd, {"status_code": None, "message": str(exc)}
-        frames.append(df_chain)
-    if not frames:
-        return pd.DataFrame(), min_value_usd, None
-    df_all = pd.concat(frames, ignore_index=True)
-    thresholds = sorted(
-        {min_value_usd, max(min_value_usd / 2, 100_000), 100_000}, reverse=True
-    )
-    best_df = None
-    used_threshold = min_value_usd
-    for thr in thresholds:
-        df_thr = df_all[df_all["value_usd"] >= thr]
-        if not df_thr.empty:
-            best_df = df_thr.sort_values("time", ascending=False).reset_index(drop=True)
-            used_threshold = thr
-            break
-    if best_df is None:
-        return pd.DataFrame(), thresholds[-1], None
-    return best_df, used_threshold, None
+    df = df.sort_values("time", ascending=False).reset_index(drop=True)
+    df["asset"] = df["chain"]
+    return df
 
 
 def detect_pattern_messages(
@@ -362,27 +349,19 @@ st.write(
 )
 notify_placeholder = st.empty()
 
+used_threshold = min_value_usd
 with st.spinner(TEXT[lang]["loading"]):
-    df_transactions, used_threshold, blockchair_error_details = load_whale_transactions(
-        min_value_usd
-    )
+    df_transactions = load_whale_transactions(min_value_usd)
 
-if blockchair_error_details:
-    status_code = blockchair_error_details.get("status_code")
-    status_display = status_code if status_code is not None else "n/a"
-    error_message = blockchair_error_details.get("message") or TEXT[lang][
-        "blockchair_unavailable_note"
-    ]
-    st.error(
-        TEXT[lang]["blockchair_error_msg"].format(
-            status_code=status_display, error_msg=error_message
-        )
+blockchair_error = (
+    df_transactions.empty
+    and all(
+        BLOCKCHAIR_STATUS.get(chain, {}).get("status") == "error"
+        for chain in BLOCKCHAIR_CHAINS
     )
-    st.info(TEXT[lang]["blockchair_unavailable_note"])
-    df_transactions = pd.DataFrame()
-    used_threshold = min_value_usd
-elif df_transactions is None:
-    df_transactions = pd.DataFrame()
+)
+if blockchair_error:
+    st.error(TEXT[lang]["blockchair_unavailable_note"])
 
 pattern_messages = detect_pattern_messages(df_transactions, lang, used_threshold)
 
@@ -410,10 +389,30 @@ if used_threshold < min_value_usd:
 if df_transactions.empty:
     st.info(TEXT[lang]["no_data"])
 else:
+    if "asset" not in df_transactions.columns and "chain" in df_transactions.columns:
+        df_transactions["asset"] = df_transactions["chain"]
+    if "value_native" not in df_transactions.columns:
+        df_transactions["value_native"] = pd.NA
+    if "is_coinbase" not in df_transactions.columns:
+        df_transactions["is_coinbase"] = False
+
     df_transactions["signals_text"] = TEXT[lang]["signals_column_default"]
     df_transactions["display_time"] = df_transactions["time"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _format_value_native(row: pd.Series) -> str:
+        value = row.get("value_native")
+        if value is None or pd.isna(value):
+            return "-"
+        try:
+            value_float = float(value)
+        except Exception:
+            return "-"
+        if value_float == 0:
+            return "-"
+        return f"{value_float:,.4f} {row['asset']}"
+
     df_transactions["value_native_fmt"] = df_transactions.apply(
-        lambda row: f"{row['value_native']:,.4f} {row['asset']}", axis=1
+        _format_value_native, axis=1
     )
     df_transactions["value_usd_fmt"] = df_transactions["value_usd"].apply(format_usd)
     df_transactions["coinbase_fmt"] = df_transactions["is_coinbase"].apply(

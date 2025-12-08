@@ -2,89 +2,63 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { fetchStatus, startBot, stopBot, StatusSummary } from '@/lib/data';
 import { IndicatorStatus, StatusIndicator } from './StatusIndicator';
 
-type StatusResponse = {
-  ok: boolean;
-  botEnabled?: boolean;
-  botRunning?: boolean;
-  wsConnected?: boolean;
-  dbConnected?: boolean;
-  lastHeartbeat?: string | null;
-  error?: string;
-};
-
 export function SystemStatus() {
-  const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [status, setStatus] = useState<StatusSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [togglePending, setTogglePending] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
 
-  const fetchStatus = useCallback(async () => {
+  const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/status');
-      const data: StatusResponse = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Impossibile leggere lo stato');
-      }
+      const data = await fetchStatus();
       setStatus(data);
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Errore di connessione');
-      setStatus((prev) => (prev ? { ...prev, ok: false, dbConnected: false } : { ok: false, dbConnected: false }));
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    loadStatus();
+    const interval = setInterval(loadStatus, 5000);
     return () => clearInterval(interval);
-  }, [fetchStatus]);
+  }, [loadStatus]);
 
   const statusIndicators = useMemo(() => {
-    const botRunningStatus: IndicatorStatus = loading
-      ? 'unknown'
-      : status?.botRunning
-      ? 'ok'
-      : 'error';
-    const wsStatus: IndicatorStatus = loading
-      ? 'unknown'
-      : status?.wsConnected
-      ? 'ok'
-      : 'error';
-    const dbStatus: IndicatorStatus = loading
-      ? 'unknown'
-      : status?.dbConnected && status?.ok
-      ? 'ok'
-      : 'error';
-
-    return { botRunningStatus, wsStatus, dbStatus };
+    const botStatus: IndicatorStatus = loading ? 'unknown' : status?.botRunning ? 'ok' : 'error';
+    const wsStatus: IndicatorStatus = loading ? 'unknown' : status?.websocketConnected ? 'ok' : 'error';
+    const dashboardStatus: IndicatorStatus = loading ? 'unknown' : status?.dashboardConnected ? 'ok' : 'error';
+    return { botStatus, wsStatus, dashboardStatus };
   }, [loading, status]);
 
-  const handleToggle = async (enabled: boolean) => {
-    if (!status) return;
-    const previousEnabled = status.botEnabled ?? false;
-    setTogglePending(true);
-    setStatus({ ...status, botEnabled: enabled });
+  const handleStart = async () => {
+    setActionPending(true);
     try {
-      const res = await fetch('/api/status/bot-enabled', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
-      });
-      const data: StatusResponse = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Aggiornamento stato bot fallito');
-      }
+      const data = await startBot();
       setStatus(data);
       setError(null);
     } catch (err: any) {
-      setStatus((prev) => (prev ? { ...prev, botEnabled: previousEnabled } : prev));
-      setError(err.message || 'Errore di connessione');
+      setError(err.message || 'Impossibile avviare il bot');
     } finally {
-      setTogglePending(false);
+      setActionPending(false);
+    }
+  };
+
+  const handleStop = async () => {
+    setActionPending(true);
+    try {
+      const data = await stopBot();
+      setStatus(data);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || 'Impossibile fermare il bot');
+    } finally {
+      setActionPending(false);
     }
   };
 
@@ -94,33 +68,54 @@ export function SystemStatus() {
       <div className="status-section">
         <StatusIndicator
           label="Bot paper trading"
-          status={statusIndicators.botRunningStatus}
+          status={statusIndicators.botStatus}
           description={loading ? 'Caricamento...' : status?.botRunning ? 'Running' : 'Fermo'}
         />
         <StatusIndicator
           label="WebSocket Hyperliquid"
           status={statusIndicators.wsStatus}
-          description={loading ? 'Caricamento...' : status?.wsConnected ? 'Connesso' : 'Disconnesso'}
+          description={loading ? 'Caricamento...' : status?.websocketConnected ? 'Connesso' : 'Disconnesso'}
         />
         <StatusIndicator
-          label="Dashboard ↔ DB"
-          status={statusIndicators.dbStatus}
-          description={loading ? 'Caricamento...' : status?.dbConnected ? 'Online' : 'Errore connessione'}
+          label="Dashboard ↔ API"
+          status={statusIndicators.dashboardStatus}
+          description={loading ? 'Caricamento...' : status?.dashboardConnected ? 'Online' : 'Scollegata'}
         />
       </div>
-      <div className="status-actions">
-        <label className="toggle-label">
-          <input
-            type="checkbox"
-            checked={Boolean(status?.botEnabled)}
-            onChange={(e) => handleToggle(e.target.checked)}
-            disabled={togglePending || loading}
-          />
-          Bot abilitato
-        </label>
+      <div className="status-actions" style={{ gap: 8 }}>
+        <button
+          onClick={handleStart}
+          disabled={actionPending}
+          style={{
+            background: 'var(--positive)',
+            color: '#0a0f1f',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 12px',
+            cursor: 'pointer',
+            fontWeight: 700
+          }}
+        >
+          {actionPending ? 'Attendere…' : 'Start Bot'}
+        </button>
+        <button
+          onClick={handleStop}
+          disabled={actionPending}
+          style={{
+            background: 'var(--negative)',
+            color: '#0a0f1f',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 12px',
+            cursor: 'pointer',
+            fontWeight: 700
+          }}
+        >
+          {actionPending ? 'Attendere…' : 'Stop Bot'}
+        </button>
         {status?.lastHeartbeat && (
           <span style={{ color: 'var(--muted)', fontSize: 13 }}>
-            Ultimo heartbeat: {new Date(status.lastHeartbeat).toLocaleString()}
+            Ultimo heartbeat: {new Date(status.lastHeartbeat * 1000).toLocaleString()}
           </span>
         )}
       </div>

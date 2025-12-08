@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getRunDetails } from '@/lib/data';
+import { fetchRuns, fetchTrades } from '@/lib/data';
 import { MetricCard } from '../../components/MetricCard';
 import { EquityChart } from '../../components/EquityChart';
 import { PnlBarChart } from '../../components/PnlBarChart';
@@ -16,15 +16,17 @@ function formatDate(timestamp: number | null | undefined) {
 }
 
 function formatSeconds(seconds: number | null | undefined) {
-  if (!seconds) return '—';
+  if (seconds === null || seconds === undefined) return '—';
   const hours = seconds / 3600;
   return `${hours.toFixed(2)} h`;
 }
 
-export default function RunPage({ params }: Params) {
-  const details = getRunDetails(params.runId);
+export default async function RunPage({ params }: Params) {
+  const [runs, trades] = await Promise.all([fetchRuns(), fetchTrades(params.runId)]);
+  const run = runs.find((r) => r.runId === params.runId);
+  const orderedTrades = trades.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-  if (!details.metadata) {
+  if (!run) {
     return (
       <div className="panel">
         <p>Run non trovata.</p>
@@ -33,8 +35,18 @@ export default function RunPage({ params }: Params) {
     );
   }
 
-  const { metadata, trades, equityCurve, maxDrawdown } = details;
-  const pnlSeries = trades.map((t) => ({ timestamp: t.timestamp, pnl: t.realized_pnl }));
+  let cumulative = 0;
+  const equityCurve = orderedTrades.map((trade) => {
+    cumulative += trade.pnl || 0;
+    return { timestamp: trade.timestamp || 0, equity: cumulative };
+  });
+  const pnlSeries = orderedTrades.map((trade) => ({ timestamp: trade.timestamp || 0, pnl: trade.pnl || 0 }));
+
+  const durationSeconds =
+    run.startTimestamp && run.endTimestamp ? run.endTimestamp - run.startTimestamp : null;
+  const winRate = orderedTrades.length
+    ? orderedTrades.filter((t) => (t.pnl || 0) > 0).length / orderedTrades.length
+    : 0;
 
   return (
     <div className="grid" style={{ gridTemplateColumns: '2fr 1fr', gap: 12 }}>
@@ -42,22 +54,33 @@ export default function RunPage({ params }: Params) {
         <Link href="/" style={{ color: 'var(--accent)' }}>
           ← Torna alle run
         </Link>
-        <h2 style={{ marginTop: 12 }}>{metadata.runId}</h2>
-        <p className="section-title">{metadata.notes || 'Nessuna nota per questa run.'}</p>
+        <h2 style={{ marginTop: 12 }}>{run.runId}</h2>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <span className={`badge ${metadata.status === 'active' ? 'active' : 'completed'}`}>{metadata.status}</span>
-          <span className="badge">{trades.length} trade</span>
+          <span className={`badge ${run.status === 'running' ? 'active' : 'completed'}`}>{run.status}</span>
+          <span className="badge">{orderedTrades.length} trade</span>
         </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gridColumn: '1 / span 2' }}>
-        <MetricCard label="Inizio" value={formatDate(metadata.startTimestamp)} />
-        <MetricCard label="Fine" value={formatDate(metadata.endTimestamp)} />
-        <MetricCard label="Durata" value={formatSeconds(metadata.durationSeconds)} />
-        <MetricCard label="Totale PnL" value={metadata.totalPnl.toFixed(5)} emphasis={metadata.totalPnl >= 0 ? 'positive' : 'negative'} />
-        <MetricCard label="PnL medio" value={metadata.averagePnl.toFixed(5)} />
-        <MetricCard label="Win rate" value={`${(metadata.winRate * 100).toFixed(1)}%`} />
-        <MetricCard label="Max drawdown" value={maxDrawdown.toFixed(5)} emphasis={maxDrawdown > 0 ? 'negative' : 'neutral'} />
+        <MetricCard label="Inizio" value={formatDate(run.startTimestamp)} />
+        <MetricCard label="Fine" value={formatDate(run.endTimestamp)} />
+        <MetricCard label="Durata" value={formatSeconds(durationSeconds)} />
+        <MetricCard label="Totale PnL" value={run.totalPnl.toFixed(5)} emphasis={run.totalPnl >= 0 ? 'positive' : 'negative'} />
+        <MetricCard label="PnL medio" value={(run.totalPnl / Math.max(1, run.totalTrades)).toFixed(5)} />
+        <MetricCard label="Win rate" value={`${(winRate * 100).toFixed(1)}%`} />
+        <MetricCard
+          label="Max drawdown"
+          value={(() => {
+            let peak = 0;
+            let maxDrawdown = 0;
+            for (const point of equityCurve) {
+              peak = Math.max(peak, point.equity);
+              maxDrawdown = Math.max(maxDrawdown, peak - point.equity);
+            }
+            return maxDrawdown.toFixed(5);
+          })()}
+          emphasis="negative"
+        />
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gridColumn: '1 / span 2', gap: 12 }}>
@@ -66,7 +89,7 @@ export default function RunPage({ params }: Params) {
       </div>
 
       <div style={{ gridColumn: '1 / span 2' }}>
-        <TradesTable trades={trades} />
+        <TradesTable trades={orderedTrades} />
       </div>
 
       <div style={{ gridColumn: '1 / span 2' }}>

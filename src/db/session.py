@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from src.config.loader import load_config
 from src.config.models import Settings
 from src.db.models import Base
-from src.db.runtime_status import ensure_runtime_status_row
+from src.db.runtime_status import ensure_runtime_status_row, ensure_status_row
 
 _engine_cache = {}
 
@@ -42,6 +42,7 @@ def init_db(settings: Settings) -> None:
     session = Session()
     try:
         ensure_runtime_status_row(session)
+        ensure_status_row(session)
     finally:
         session.close()
 

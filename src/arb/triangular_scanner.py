@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Iterable, List, Optional, Tuple
 
 from src.arb.market_graph import Triangle
 from src.arb.orderbook_cache import OrderbookCache
@@ -16,12 +16,12 @@ logger = get_logger(__name__)
 @dataclass
 class Opportunity:
     triangle_id: int
-    assets: tuple[str, str, str]
+    assets: Tuple[str, str, str]
     timestamp: float
     initial_size: float
     theoretical_final_amount: float
     theoretical_edge: float
-    slippage: tuple[float, float, float]
+    slippage: Tuple[float, float, float]
 
 
 class TriangularScanner:
@@ -40,7 +40,7 @@ class TriangularScanner:
                     await callback(opp)
             await asyncio.sleep(interval_ms / 1000)
 
-    def evaluate_triangle(self, triangle: Triangle, amount_quote: float) -> Opportunity | None:
+    def evaluate_triangle(self, triangle: Triangle, amount_quote: float) -> Optional[Opportunity]:
         a, b, c = triangle.assets
         leg1_pair = triangle.edges[0].pair
         leg2_pair = triangle.edges[1].pair

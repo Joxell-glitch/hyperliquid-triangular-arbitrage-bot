@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import Optional
 
 import typer
 
@@ -47,7 +48,7 @@ def measure_latency(config_path: str = typer.Option("config/config.yaml")):
 
 
 @app.command()
-def run_paper_bot(config_path: str = typer.Option("config/config.yaml"), run_id: str | None = typer.Option(None)):
+def run_paper_bot(config_path: str = typer.Option("config/config.yaml"), run_id: Optional[str] = typer.Option(None)):
     settings = load_config(config_path)
     setup_logging(settings.logging)
     run_id = run_id or str(uuid.uuid4())

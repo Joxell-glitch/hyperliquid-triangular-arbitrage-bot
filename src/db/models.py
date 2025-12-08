@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy import Boolean, Column, Float, Integer, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 from sqlalchemy.types import JSON
 
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 
 class RunMetadata(Base):
@@ -14,9 +15,9 @@ class RunMetadata(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     start_timestamp: Mapped[float] = mapped_column(Float)
-    end_timestamp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     config_snapshot: Mapped[dict] = mapped_column(JSON)
-    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class Opportunity(Base):
@@ -54,7 +55,7 @@ class PaperTrade(Base):
     fees_paid_leg2: Mapped[float] = mapped_column(Float)
     fees_paid_leg3: Mapped[float] = mapped_column(Float)
     was_executed: Mapped[bool] = mapped_column(Boolean)
-    reason_if_not_executed: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason_if_not_executed: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class PortfolioSnapshot(Base):

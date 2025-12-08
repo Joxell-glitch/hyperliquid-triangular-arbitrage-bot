@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -39,7 +39,7 @@ def init_db(settings: Settings) -> None:
     Base.metadata.create_all(engine)
 
 
-def get_session(settings: Settings | None = None):
+def get_session(settings: Optional[Settings] = None):
     settings = settings or load_config("config/config.yaml")
     engine = get_engine(settings)
     Session = sessionmaker(engine, expire_on_commit=False)

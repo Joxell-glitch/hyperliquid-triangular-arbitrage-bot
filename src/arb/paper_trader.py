@@ -4,7 +4,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 from src.arb.orderbook_cache import OrderbookCache
 from src.arb.triangular_scanner import Opportunity
@@ -27,8 +27,8 @@ class ExecutionResult:
     realized_final_amount: float
     realized_edge: float
     realized_pnl: float
-    slippage: tuple[float, float, float]
-    fees: tuple[float, float, float]
+    slippage: Tuple[float, float, float]
+    fees: Tuple[float, float, float]
 
 
 class PaperTrader:
@@ -119,7 +119,7 @@ class PaperTrader:
             fees=(fees1, fees2, fees3),
         )
 
-    def _record_trade(self, opp: Opportunity, execution: ExecutionResult | None, executed: bool, reason: str | None) -> None:
+    def _record_trade(self, opp: Opportunity, execution: Optional[ExecutionResult], executed: bool, reason: Optional[str]) -> None:
         session = self.db_session_factory()
         with session as s:
             s.add(

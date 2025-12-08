@@ -69,3 +69,13 @@ class RuntimeStatus(Base):
     bot_running = Column(Boolean, default=False)
     ws_connected = Column(Boolean, default=False)
     last_heartbeat = Column(Float, nullable=True)
+
+
+class Status(Base):
+    __tablename__ = "status"
+    id = Column(Integer, primary_key=True)
+    bot_enabled = Column(Boolean, default=True)
+    bot_running = Column(Boolean, default=False)
+    ws_connected = Column(Boolean, default=False)
+    dashboard_connected = Column(Boolean, default=False)
+    last_heartbeat = Column(Float, nullable=True)

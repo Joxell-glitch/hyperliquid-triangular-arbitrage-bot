@@ -5,3 +5,5 @@ pandas
 twilio
 altair
 sqlalchemy>=1.4,<2.0
+fastapi
+uvicorn

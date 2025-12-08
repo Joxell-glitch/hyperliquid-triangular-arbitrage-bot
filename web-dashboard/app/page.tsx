@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getRuns } from '@/lib/data';
+import { fetchRuns } from '@/lib/data';
 import { MetricCard } from './components/MetricCard';
 import { SystemStatus } from './components/SystemStatus';
 
@@ -15,16 +15,20 @@ function formatDuration(seconds: number | null) {
 }
 
 export default async function HomePage() {
-  const runs = getRuns();
+  const runs = await fetchRuns();
 
   const totals = runs.reduce(
     (acc, run) => {
-      acc.trades += run.tradeCount;
+      acc.trades += run.totalTrades;
       acc.pnl += run.totalPnl;
       return acc;
     },
     { trades: 0, pnl: 0 }
   );
+
+  const avgDurationSeconds =
+    runs.reduce((acc, run) => acc + ((run.endTimestamp || Date.now() / 1000) - (run.startTimestamp || 0)), 0) /
+    (runs.length || 1);
 
   return (
     <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 12 }}>
@@ -53,15 +57,14 @@ export default async function HomePage() {
                       <Link href={`/runs/${run.runId}`} style={{ color: 'var(--accent)' }}>
                         {run.runId}
                       </Link>
-                      <div style={{ color: 'var(--muted)', fontSize: 12 }}>{run.notes || '—'}</div>
                     </td>
                     <td>{formatDate(run.startTimestamp)}</td>
                     <td>{formatDate(run.endTimestamp)}</td>
-                    <td>{run.tradeCount}</td>
+                    <td>{run.totalTrades}</td>
                     <td className={run.totalPnl >= 0 ? 'positive' : 'negative'}>{run.totalPnl.toFixed(5)}</td>
                     <td>{(run.winRate * 100).toFixed(1)}%</td>
                     <td>
-                      <span className={`badge ${run.status === 'active' ? 'active' : 'completed'}`}>
+                      <span className={`badge ${run.status === 'running' ? 'active' : 'completed'}`}>
                         {run.status}
                       </span>
                     </td>
@@ -78,8 +81,8 @@ export default async function HomePage() {
             value={totals.pnl.toFixed(5)}
             emphasis={totals.pnl >= 0 ? 'positive' : 'negative'}
           />
-          <MetricCard label="Run attive" value={runs.filter((r) => r.status === 'active').length.toString()} />
-          <MetricCard label="Durata media" value={formatDuration(runs.reduce((acc, r) => acc + (r.durationSeconds || 0), 0) / (runs.length || 1))} />
+          <MetricCard label="Run attive" value={runs.filter((r) => r.status === 'running').length.toString()} />
+          <MetricCard label="Durata media" value={formatDuration(avgDurationSeconds)} />
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchLogs } from '@/lib/data';
 
 export function LogsViewer() {
   const [lines, setLines] = useState<string[]>([]);
@@ -10,10 +11,9 @@ export function LogsViewer() {
   async function load() {
     setLoading(true);
     try {
-      const res = await fetch('/api/logs');
-      const json = await res.json();
-      setLines(json.lines ?? []);
-      setMessage(json.message ?? null);
+      const data = await fetchLogs();
+      setLines(data);
+      setMessage(null);
     } catch (err: any) {
       setMessage(err.message);
     } finally {

@@ -41,7 +41,7 @@ This repository contains an asynchronous Python 3.11+ paper-trading bot for **tr
 
 4. Run the paper bot (streams order books, scans triangles, simulates trades):
    ```bash
-   python -m src.cli run-paper-bot --config-path config/config.yaml
+   python -m src.cli.run_paper_bot --config-path config/config.yaml
    ```
    Stop with `Ctrl+C`. A new `run_id` is generated unless provided.
 

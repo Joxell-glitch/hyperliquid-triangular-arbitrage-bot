@@ -106,3 +106,18 @@ class ProfitOpportunity(Base):
     triangle_id = Column(Integer, index=True)
     profit = Column(Float)
     timestamp = Column(DateTime)
+
+
+class SpotPerpOpportunity(Base):
+    __tablename__ = "spot_perp_opportunities"
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(Float)
+    asset = Column(String, index=True)
+    direction = Column(String)
+    spot_price = Column(Float)
+    perp_price = Column(Float)
+    mark_price = Column(Float)
+    spread_gross = Column(Float)
+    fee_estimated = Column(Float)
+    funding_estimated = Column(Float)
+    pnl_net_estimated = Column(Float)

@@ -182,13 +182,16 @@ class HyperliquidClient:
     async def _heartbeat_loop(self) -> None:
         try:
             self._logger.info("[WS_FEED] heartbeat loop started")
+            if self._ws and not self._ws.closed:
+                self._logger.info("[WS_FEED] sending initial ping")
+                await self._ws.send(json.dumps({"method": "ping"}))
+                self._logger.info("[WS_FEED] ping sent")
             while self._ws and not self._ws.closed:
                 await asyncio.sleep(25)
                 if not self._ws or self._ws.closed:
                     break
-                ping_payload = {"method": "ping"}
-                self._logger.info("[WS_FEED] sending ping payload=%s", ping_payload)
-                await self._ws.send(json.dumps(ping_payload))
+                self._logger.info("[WS_FEED] sending ping")
+                await self._ws.send(json.dumps({"method": "ping"}))
                 self._logger.info("[WS_FEED] ping sent")
         except asyncio.CancelledError:
             self._logger.info("[WS_FEED] heartbeat loop cancelled")

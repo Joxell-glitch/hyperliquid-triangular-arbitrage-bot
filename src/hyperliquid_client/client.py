@@ -111,18 +111,22 @@ class HyperliquidClient:
         await self._connected_event.wait()
         if not self._ws:
             raise RuntimeError("WebSocket not connected")
-        for coin, base in symbol_map.items():
-            sub_payload: Dict[str, Any] = {"type": "l2Book", "coin": coin}
-            sub_key = ("l2Book", coin, kind)
-            perp_key = f"perp:{coin}"
-            spot_key = f"spot:{coin}"
+        for symbol, base_asset in symbol_map.items():
+            payload_coin = symbol if kind == "spot" else symbol
+            if kind == "spot" and "/" not in payload_coin:
+                payload_coin = f"{payload_coin}/USDC"
+
+            sub_payload: Dict[str, Any] = {"type": "l2Book", "coin": payload_coin}
+            sub_key = ("l2Book", payload_coin, kind)
+            perp_key = f"perp:{payload_coin}"
+            spot_key = f"spot:{payload_coin}"
             if kind == "perp":
                 sub_payload["isPerp"] = True
                 self._perp_subscriptions.add(perp_key)
-                self._perp_symbol_to_base[coin] = base
+                self._perp_symbol_to_base[payload_coin] = base_asset
             else:
                 self._spot_subscriptions.add(spot_key)
-                self._spot_symbol_to_base[coin] = base
+                self._spot_symbol_to_base[payload_coin] = base_asset
             if sub_key in self._sent_subscriptions:
                 continue
             await self._send_subscribe(sub_payload)

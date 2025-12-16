@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.config.loader import load_config
 from src.config.models import Settings, TradingSettings
@@ -75,6 +74,9 @@ class SpotPerpPaperEngine:
             asset: {"spot": 0, "perp": 0, "mark": 0} for asset in self.assets
         }
 
+        self.client.add_orderbook_listener(self._on_orderbook)
+        self.client.add_mark_listener(self._on_mark)
+
     async def run_forever(self, stop_event: Optional[asyncio.Event] = None) -> None:
         self._running = True
         logger.info(
@@ -82,15 +84,12 @@ class SpotPerpPaperEngine:
             self.assets,
             self._heartbeat_interval,
         )
-        await self.client.connect_ws()
-        await self._subscribe_streams()
+        await self.client.start_market_data(self.assets, self.assets, self.assets)
 
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(stop_event))
 
-        async for msg in self.client.ws_messages():
-            if stop_event and stop_event.is_set():
-                break
-            self._handle_message(msg)
+        while self._running and (not stop_event or not stop_event.is_set()):
+            await asyncio.sleep(1)
         self._running = False
 
         if self._heartbeat_task:
@@ -98,73 +97,50 @@ class SpotPerpPaperEngine:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
 
-    async def _subscribe_streams(self) -> None:
-        """Subscribe to spot and perp books plus mark/funding updates."""
-        if not self.client._ws:
-            raise RuntimeError("WebSocket not connected")
-        subscriptions = []
-        for asset in self.assets:
-            subscriptions.append({"type": "l2Book", "coin": asset})
-            subscriptions.append({"type": "l2Book", "coin": asset, "perp": True})
-            subscriptions.append({"type": "markPrice", "coin": asset})
-            subscriptions.append({"type": "funding", "coin": asset})
-        await self.client._ws.send(json.dumps({"type": "subscribe", "subscriptions": subscriptions}))
-        spot_topics = [f"l2Book:{asset}" for asset in self.assets]
-        perp_topics = [f"l2Book:{asset}:perp" for asset in self.assets]
-        mark_topics = [f"markPrice:{asset}" for asset in self.assets]
-        logger.info(
-            "[SPOT_PERP][INFO] subscriptions spot_topics=%s perp_topics=%s mark_topics=%s",
-            spot_topics,
-            perp_topics,
-            mark_topics,
-        )
+    def _on_orderbook(self, kind: str, coin: str, ob_norm: Dict[str, Any]) -> None:
+        if coin not in self.asset_state:
+            return
+        book = BookSnapshot(best_bid=ob_norm.get("bid") or 0.0, best_ask=ob_norm.get("ask") or 0.0)
+        ts = ob_norm.get("ts") or time.time()
+        if kind == "perp":
+            self.asset_state[coin].perp = book
+            self.update_counts[coin]["perp"] += 1
+            logger.debug(
+                "[SPOT_PERP][DEBUG] perp_update asset=%s bid=%.6f ask=%.6f ts=%s",
+                coin,
+                book.best_bid,
+                book.best_ask,
+                ts,
+            )
+        else:
+            self.asset_state[coin].spot = book
+            self.update_counts[coin]["spot"] += 1
+            logger.debug(
+                "[SPOT_PERP][DEBUG] spot_update asset=%s bid=%.6f ask=%.6f ts=%s",
+                coin,
+                book.best_bid,
+                book.best_ask,
+                ts,
+            )
+        self._evaluate_and_record(coin)
 
-    def _handle_message(self, msg: Dict) -> None:
-        msg_type = msg.get("type")
-        if msg_type == "l2Book":
-            coin = msg.get("coin") or msg.get("asset")
-            if not coin or coin not in self.asset_state:
-                return
-            levels = msg.get("levels", {})
-            bids = levels.get("bids", [])
-            asks = levels.get("asks", [])
-            book = BookSnapshot.from_levels(bids, asks)
-            if msg.get("perp") or msg.get("isPerp"):
-                self.asset_state[coin].perp = book
-                self.update_counts[coin]["perp"] += 1
-                logger.debug(
-                    "[SPOT_PERP][DEBUG] perp_update asset=%s bid=%.6f ask=%.6f ts=%s",
-                    coin,
-                    book.best_bid,
-                    book.best_ask,
-                    msg.get("time") or msg.get("ts") or time.time(),
-                )
-            else:
-                self.asset_state[coin].spot = book
-                self.update_counts[coin]["spot"] += 1
-                logger.debug(
-                    "[SPOT_PERP][DEBUG] spot_update asset=%s bid=%.6f ask=%.6f ts=%s",
-                    coin,
-                    book.best_bid,
-                    book.best_ask,
-                    msg.get("time") or msg.get("ts") or time.time(),
-                )
-            self._evaluate_and_record(coin)
-        elif msg_type == "markPrice":
-            coin = msg.get("coin")
-            if coin in self.asset_state:
-                self.asset_state[coin].mark_price = float(msg.get("mark", 0.0))
-                self.update_counts[coin]["mark"] += 1
-                logger.debug(
-                    "[SPOT_PERP][DEBUG] mark_update asset=%s mark=%.6f ts=%s",
-                    coin,
-                    self.asset_state[coin].mark_price,
-                    msg.get("time") or msg.get("ts") or time.time(),
-                )
-        elif msg_type == "funding":
-            coin = msg.get("coin")
-            if coin in self.asset_state:
-                self.asset_state[coin].funding_rate = float(msg.get("fundingRate", 0.0))
+    def _on_mark(self, coin: str, mark: float, raw_payload: Dict[str, Any]) -> None:
+        if coin not in self.asset_state:
+            return
+        self.asset_state[coin].mark_price = mark
+        self.update_counts[coin]["mark"] += 1
+        ts = raw_payload.get("time") or raw_payload.get("ts") or time.time()
+        logger.debug(
+            "[SPOT_PERP][DEBUG] mark_update asset=%s mark=%.6f ts=%s",
+            coin,
+            mark,
+            ts,
+        )
+        if raw_payload.get("fundingRate") is not None:
+            try:
+                self.asset_state[coin].funding_rate = float(raw_payload.get("fundingRate"))
+            except Exception:
+                pass
 
     async def _heartbeat_loop(self, stop_event: Optional[asyncio.Event]) -> None:
         while self._running and (not stop_event or not stop_event.is_set()):

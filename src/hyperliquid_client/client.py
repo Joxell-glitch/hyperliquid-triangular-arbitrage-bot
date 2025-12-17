@@ -102,7 +102,9 @@ class HyperliquidClient:
             while True:
                 try:
                     logger.info("Connecting to Hyperliquid WebSocket: %s", self.websocket_url)
-                    self._ws = await websockets.connect(self.websocket_url, ping_interval=20)
+                    self._ws = await websockets.connect(
+                        self.websocket_url, ping_interval=None, ping_timeout=None
+                    )
                     self._connected_event.set()
                     logger.info("WebSocket connected")
                     self._logger.info("[WS_FEED] creating heartbeat task")
@@ -184,14 +186,22 @@ class HyperliquidClient:
             self._logger.info("[WS_FEED] heartbeat loop started")
             if self._ws and not self._ws.closed:
                 self._logger.info("[WS_FEED] sending initial ping")
-                await self._ws.send(json.dumps({"method": "ping"}))
+                try:
+                    await self._ws.send(json.dumps({"method": "ping"}))
+                except Exception:
+                    self._logger.exception("[WS_FEED] ping send failed")
+                    raise
                 self._logger.info("[WS_FEED] ping sent")
             while self._ws and not self._ws.closed:
                 await asyncio.sleep(25)
                 if not self._ws or self._ws.closed:
                     break
                 self._logger.info("[WS_FEED] sending ping")
-                await self._ws.send(json.dumps({"method": "ping"}))
+                try:
+                    await self._ws.send(json.dumps({"method": "ping"}))
+                except Exception:
+                    self._logger.exception("[WS_FEED] ping send failed")
+                    raise
                 self._logger.info("[WS_FEED] ping sent")
         except asyncio.CancelledError:
             self._logger.info("[WS_FEED] heartbeat loop cancelled")
@@ -201,7 +211,7 @@ class HyperliquidClient:
 
     def _handle_ws_message(self, msg: Dict[str, Any]) -> None:
         if msg.get("channel") == "pong":
-            self._logger.info("[WS_FEED] received pong")
+            self._logger.info("[WS_FEED] received pong msg=%s", msg)
             return
 
         if msg.get("channel") == "error" or msg.get("type") == "error":
@@ -247,17 +257,22 @@ class HyperliquidClient:
                     continue
                 try:
                     raw_msg = await self._ws.recv()
-                except websockets.ConnectionClosed as exc:
-                    logger.warning("WebSocket closed: %s", exc)
+                except websockets.ConnectionClosed:
                     self._connected_event.clear()
-                    break
+                    raise
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning("WebSocket receive error: %s", exc)
                     await asyncio.sleep(0.5)
                     continue
 
                 msg = self._ensure_dict(raw_msg)
-                if msg is None:
+                if isinstance(msg, dict):
+                    ch = msg.get("channel")
+                    keys = list(msg.keys())
+                    dkeys = list(msg.get("data", {}).keys()) if isinstance(msg.get("data"), dict) else None
+                    self._logger.info("[WS_FEED][RAW_RECV] channel=%s keys=%s data_keys=%s", ch, keys, dkeys)
+                else:
+                    self._logger.info("[WS_FEED][RAW_RECV] non-dict msg=%r", raw_msg)
                     continue
 
                 if self._raw_sample_logged < sample_limit:
@@ -272,6 +287,16 @@ class HyperliquidClient:
                         snippet[:500],
                     )
                 self._handle_ws_message(msg)
+        except websockets.ConnectionClosed as e:
+            self._logger.warning(
+                "[WS_FEED] recv loop ConnectionClosed code=%s reason=%s",
+                getattr(e, "code", None),
+                getattr(e, "reason", None),
+            )
+            raise
+        except Exception:
+            self._logger.exception("[WS_FEED] recv loop crashed")
+            raise
         finally:
             if self._heartbeat_task:
                 self._heartbeat_task.cancel()

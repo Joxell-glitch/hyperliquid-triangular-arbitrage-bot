@@ -17,6 +17,8 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+BOOKS_IDLE_TIMEOUT = int(os.getenv("HL_BOOKS_IDLE_TIMEOUT", "20"))
+
 
 class HyperliquidClient:
     """Thin wrapper around Hyperliquid REST and WebSocket APIs."""
@@ -68,6 +70,9 @@ class HyperliquidClient:
         self._subscribe_delay_ms = self._get_subscribe_delay_ms()
         self._stopped = False
         self._reconnect_delay = 2
+        self._books_last_l2book: Optional[float] = None
+        self._books_watchdog_task: Optional[asyncio.Task] = None
+        self._books_idle_timeout = BOOKS_IDLE_TIMEOUT
 
     @property
     def rest_base(self) -> str:
@@ -278,6 +283,8 @@ class HyperliquidClient:
                         list(msg.keys()),
                         snippet[:500],
                     )
+                if name == "WS_BOOKS" and self._is_l2book(msg):
+                    self._books_last_l2book = time.monotonic()
                 self._handle_ws_message(msg)
         except websockets.ConnectionClosed as e:
             self._logger.warning(
@@ -332,6 +339,12 @@ class HyperliquidClient:
                     self._ws_recv_loop(ws, name, first_message_reset)
                 )
                 setattr(self, recv_task_attr, recv_task)
+                if name == "WS_BOOKS":
+                    self._books_last_l2book = time.monotonic()
+                    await self._cancel_books_watchdog()
+                    self._books_watchdog_task = asyncio.create_task(
+                        self._books_idle_watchdog(ws)
+                    )
                 await subscribe_fn(reconnect_attempt > 0)
                 await recv_task
             except websockets.ConnectionClosed as e:
@@ -392,6 +405,8 @@ class HyperliquidClient:
             with contextlib.suppress(asyncio.CancelledError):
                 await recv_task
         setattr(self, recv_task_attr, None)
+        if ws_attr == "_ws_books":
+            await self._cancel_books_watchdog()
         ws = getattr(self, ws_attr)
         if ws and not ws.closed:
             await ws.close()
@@ -703,7 +718,38 @@ class HyperliquidClient:
         for ws in (self._ws_market, self._ws_books):
             if ws and not ws.closed:
                 await ws.close()
+        await self._cancel_books_watchdog()
         await self._session.aclose()
+
+    async def _books_idle_watchdog(self, ws: WebSocketClientProtocol) -> None:
+        try:
+            while True:
+                await asyncio.sleep(1)
+                if self._books_last_l2book is None:
+                    continue
+                idle = time.monotonic() - self._books_last_l2book
+                if idle > self._books_idle_timeout:
+                    self._logger.warning(
+                        "[WS_BOOKS] idle watchdog: no l2Book for %.1fs -> closing ws to reconnect",
+                        idle,
+                    )
+                    with contextlib.suppress(Exception):
+                        if not ws.closed:
+                            await ws.close()
+                    break
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._books_watchdog_task is asyncio.current_task():
+                self._books_watchdog_task = None
+
+    async def _cancel_books_watchdog(self) -> None:
+        task = self._books_watchdog_task
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._books_watchdog_task = None
 
     def _normalize_spot_symbol(self, base: str) -> str:
         # Hyperliquid spot l2Book expects the base coin, not a "BASE/USDC" pair string.

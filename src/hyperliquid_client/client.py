@@ -55,7 +55,6 @@ class HyperliquidClient:
         self._mark_first_logged: set[str] = set()
         self._mark_ok: Dict[str, bool] = {}
         self._first_data_event = asyncio.Event()
-        self._heartbeat_task: Optional[asyncio.Task] = None
         self._logger = logger
 
     @property
@@ -103,13 +102,10 @@ class HyperliquidClient:
                 try:
                     logger.info("Connecting to Hyperliquid WebSocket: %s", self.websocket_url)
                     self._ws = await websockets.connect(
-                        self.websocket_url, ping_interval=None, ping_timeout=None
+                        self.websocket_url, ping_interval=20, ping_timeout=20
                     )
                     self._connected_event.set()
                     logger.info("WebSocket connected")
-                    self._logger.info("[WS_FEED] creating heartbeat task")
-                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-                    self._logger.info("[WS_FEED] heartbeat task created task=%s", self._heartbeat_task)
                     return
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning("WebSocket connection failed: %s", exc)
@@ -181,39 +177,7 @@ class HyperliquidClient:
         await self.subscribe_orderbooks(spot_symbols, kind="spot")
         await self.subscribe_orderbooks(perp_symbols, kind="perp")
 
-    async def _heartbeat_loop(self) -> None:
-        try:
-            self._logger.info("[WS_FEED] heartbeat loop started")
-            if self._ws and not self._ws.closed:
-                self._logger.info("[WS_FEED] sending initial ping")
-                try:
-                    await self._ws.send(json.dumps({"method": "ping"}))
-                except Exception:
-                    self._logger.exception("[WS_FEED] ping send failed")
-                    raise
-                self._logger.info("[WS_FEED] ping sent")
-            while self._ws and not self._ws.closed:
-                await asyncio.sleep(25)
-                if not self._ws or self._ws.closed:
-                    break
-                self._logger.info("[WS_FEED] sending ping")
-                try:
-                    await self._ws.send(json.dumps({"method": "ping"}))
-                except Exception:
-                    self._logger.exception("[WS_FEED] ping send failed")
-                    raise
-                self._logger.info("[WS_FEED] ping sent")
-        except asyncio.CancelledError:
-            self._logger.info("[WS_FEED] heartbeat loop cancelled")
-            raise
-        except Exception:  # pragma: no cover - defensive
-            self._logger.exception("[WS_FEED] heartbeat loop error")
-
     def _handle_ws_message(self, msg: Dict[str, Any]) -> None:
-        if msg.get("channel") == "pong":
-            self._logger.info("[WS_FEED] received pong msg=%s", msg)
-            return
-
         if msg.get("channel") == "error" or msg.get("type") == "error":
             logger.error("[WS_FEED][ERROR] subscribe_error msg=%s", msg)
             return
@@ -297,11 +261,6 @@ class HyperliquidClient:
         except Exception:
             self._logger.exception("[WS_FEED] recv loop crashed")
             raise
-        finally:
-            if self._heartbeat_task:
-                self._heartbeat_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._heartbeat_task
 
     # Parsing helpers -------------------------------------------------------
 
@@ -545,10 +504,6 @@ class HyperliquidClient:
             self._recv_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._recv_task
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._heartbeat_task
         if self._ws and not self._ws.closed:
             await self._ws.close()
         await self._session.aclose()

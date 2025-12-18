@@ -590,6 +590,24 @@ class SpotPerpPaperEngine:
         self._last_skip_reason[asset] = reason
         self._last_update_log[asset]["skip"] = now
         state = self.asset_state[asset]
+        if reason == "SKIP_NO_BOOK":
+            spot_book = getattr(self.client, "_orderbooks_spot", {}).get(asset, None)
+            perp_book = getattr(self.client, "_orderbooks_perp", {}).get(asset, None)
+            spot_bbo = (state.spot.best_bid, state.spot.best_ask)
+            perp_bbo = (state.perp.best_bid, state.perp.best_ask)
+            logger.info(
+                "[NO_BOOK_DEBUG] asset=%s "
+                "has_spot_book=%s has_perp_book=%s "
+                "spot_levels=%s perp_levels=%s "
+                "spot_bbo=%s perp_bbo=%s",
+                asset,
+                bool(spot_book),
+                bool(perp_book),
+                len(getattr(spot_book, "levels", [])) if spot_book else None,
+                len(getattr(perp_book, "levels", [])) if perp_book else None,
+                spot_bbo,
+                perp_bbo,
+            )
         logger.info(
             (
                 "[STRATEGY_SKIP] asset=%s reason=%s spot_age_ms=%s perp_age_ms=%s "

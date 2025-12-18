@@ -185,6 +185,7 @@ class SpotPerpPaperEngine:
         self._validation_recorder: Optional[ValidationRecorder] = None
         if self.validation_settings.enabled:
             self._validation_recorder = ValidationRecorder(self.db_session_factory, self.validation_settings)
+        self._last_spot_diag_log: Dict[str, float] = {asset: 0.0 for asset in self.assets}
 
     async def run_forever(self, stop_event: Optional[asyncio.Event] = None) -> None:
         self._running = True
@@ -266,6 +267,48 @@ class SpotPerpPaperEngine:
                     book.best_ask,
                     ts,
                 )
+            should_log_diag = self.update_counts[coin]["spot"] == 0 or (
+                time.time() - self._last_spot_diag_log[coin] >= 5
+            )
+            if should_log_diag:
+                snapshot = self.feed_health.build_asset_snapshot(coin)
+                num_bids = len(ob_norm.get("bids") or [])
+                num_asks = len(ob_norm.get("asks") or [])
+                criteria_failures = []
+                if not ob_norm.get("bids"):
+                    criteria_failures.append("missing_bids len=0 >=1")
+                if not ob_norm.get("asks"):
+                    criteria_failures.append("missing_asks len=0 >=1")
+                if book.best_bid <= 0:
+                    criteria_failures.append(f"bid_price<=0 bid={book.best_bid}")
+                if book.best_ask <= 0:
+                    criteria_failures.append(f"ask_price<=0 ask={book.best_ask}")
+                if snapshot.get("spot_incomplete"):
+                    criteria_failures.append("spot_incomplete=True")
+                spot_age_ms = snapshot.get("spot_age_ms")
+                stale_threshold = getattr(self.feed_health.settings, "stale_ms", None)
+                if stale_threshold is not None and (
+                    spot_age_ms is None or spot_age_ms > stale_threshold
+                ):
+                    criteria_failures.append(
+                        f"stale_age_ms={self._format_age_ms(spot_age_ms)}>{stale_threshold}"
+                    )
+                criteria_text = ", ".join(criteria_failures) if criteria_failures else "none"
+                logger.info(
+                    (
+                        "[SPOT_PERP][SPOT_BOOK_DIAG] asset=%s levels_bids=%d levels_asks=%d "
+                        "best_bid=%.6f best_ask=%.6f spot_age_ms=%s stale=%s failures=%s"
+                    ),
+                    coin,
+                    num_bids,
+                    num_asks,
+                    book.best_bid,
+                    book.best_ask,
+                    self._format_age_ms(spot_age_ms),
+                    snapshot.get("stale"),
+                    criteria_text,
+                )
+                self._last_spot_diag_log[coin] = time.time()
         self._evaluate_and_record(coin)
 
     def _on_mark(self, coin: str, mark: float, raw_payload: Dict[str, Any]) -> None:

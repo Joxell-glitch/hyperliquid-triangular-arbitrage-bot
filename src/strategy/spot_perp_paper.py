@@ -32,7 +32,7 @@ class BookSnapshot:
         return cls(best_bid=bid_price, best_ask=ask_price)
 
     def has_liquidity(self) -> bool:
-        return self.best_bid > 0 and self.best_ask > 0
+        return self.best_bid > 0 and self.best_ask > 0 and self.best_bid < self.best_ask
 
 
 @dataclass

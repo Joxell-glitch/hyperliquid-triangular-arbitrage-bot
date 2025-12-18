@@ -32,6 +32,10 @@ class AssetHealth:
     out_of_sync: bool = False
 
 
+def _has_valid_book(bid: float, ask: float) -> bool:
+    return bid > 0 and ask > 0 and bid < ask
+
+
 class FeedHealthTracker:
     def __init__(self, settings: Optional[FeedHealthSettings] = None) -> None:
         self.settings = settings or FeedHealthSettings()
@@ -79,7 +83,7 @@ class FeedHealthTracker:
         target.ts = float(ts) if ts else time.time()
         target.best_bid = best_bid or 0.0
         target.best_ask = best_ask or 0.0
-        target.incomplete = not (bids and asks and target.best_bid > 0 and target.best_ask > 0)
+        target.incomplete = not _has_valid_book(target.best_bid, target.best_ask)
         target.crossed = target.best_bid >= target.best_ask and target.best_bid > 0 and target.best_ask > 0
         now = time.time()
         if target.incomplete:

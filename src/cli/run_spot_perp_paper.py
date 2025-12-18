@@ -37,14 +37,21 @@ async def _run_engine(config_path: str, debug_feeds: bool = False, assets_arg: O
             os.path.exists(db_path),
         )
 
+    if settings.validation.enabled:
+        logger.info(
+            "[VALIDATION] enabled=true sample_interval_ms=%s stats_log_interval_sec=%s sqlite_flush_every_n=%s",
+            settings.validation.sample_interval_ms,
+            settings.validation.stats_log_interval_sec,
+            settings.validation.sqlite_flush_every_n,
+        )
+    else:
+        logger.info("[VALIDATION] enabled=false")
+
     assets = [a.strip().upper() for a in assets_arg.split(",") if a.strip()] if assets_arg else ["BTC"]
     logger.info("Starting spot-perp paper engine for assets: %s", ", ".join(assets))
 
     feed_health = FeedHealthTracker(settings.observability.feed_health)
     client = HyperliquidClient(settings.api, settings.network, feed_health_tracker=feed_health)
-    if not settings.validation.enabled:
-        logger.info("[VALIDATION] config disabled; forcing runtime validation harness on")
-        settings.validation.enabled = True
     session_factory = get_session(settings)
     engine = SpotPerpPaperEngine(
         client,

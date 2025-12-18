@@ -191,10 +191,6 @@ class HyperliquidClient:
             await self._books_connected_events[coin].wait()
             if coin not in self._sent_subscriptions_books:
                 self._sent_subscriptions_books[coin] = set()
-            sent_set = self._sent_subscriptions_books[coin]
-            if sent_set:
-                logger.info("[WS_BOOKS_%s][WS_FEED] single l2Book already subscribed; skipping", coin)
-                continue
             logger.info("[WS_BOOKS_%s] subscribing single l2Book: %s", coin, coin)
             await self._subscribe_books(coin, kind, coin)
 
@@ -679,6 +675,8 @@ class HyperliquidClient:
             logger.info("[WS_FEED] HL_DISABLE_PERP_L2BOOK=1 -> skipping perp l2Book")
             return
         sub_payload: Dict[str, Any] = {"type": "l2Book", "coin": payload_coin}
+        if kind == "perp":
+            sub_payload["isPerp"] = True
         await self._send_subscribe_ws(
             sub_payload,
             ws_attr="_ws_books",
@@ -854,12 +852,12 @@ class HyperliquidClient:
         return msg
 
     def _detect_kind(self, payload: Dict[str, Any], msg: Dict[str, Any], coin: str) -> tuple[str, str]:
-        if coin in self._perp_symbol_to_base:
-            return "perp", self._perp_symbol_to_base[coin]
+        if payload.get("perp") or payload.get("isPerp") or payload.get("contractType") == "perp" or msg.get("isPerp"):
+            return "perp", self._perp_symbol_to_base.get(coin, coin)
         if coin in self._spot_symbol_to_base:
             return "spot", self._spot_symbol_to_base[coin]
-        if payload.get("perp") or payload.get("isPerp") or payload.get("contractType") == "perp" or msg.get("isPerp"):
-            return "perp", coin
+        if coin in self._perp_symbol_to_base:
+            return "perp", self._perp_symbol_to_base[coin]
         if isinstance(coin, str) and coin.endswith("/USDC"):
             return "spot", coin.split("/")[0]
         return "spot", coin

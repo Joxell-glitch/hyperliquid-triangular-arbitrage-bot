@@ -57,7 +57,7 @@ def test_evaluate_gates_marks_missing_returns_skip():
     }
     ready, reason, details = engine._evaluate_gates("BTC", snapshot, state)
     assert ready is False
-    assert reason == "SKIP_NO_BOOK"
+    assert reason == "SKIP_NO_MARK"
     assert details["gates"]["has_mark"] is False
 
 

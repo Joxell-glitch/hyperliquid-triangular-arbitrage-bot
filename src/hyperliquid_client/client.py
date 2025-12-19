@@ -864,12 +864,37 @@ class HyperliquidClient:
 
     def _handle_mark(self, msg: Dict[str, Any]) -> None:
         payload = self._extract_payload(msg)
+        ctx = payload.get("ctx") if isinstance(payload.get("ctx"), dict) else None
+
+        is_active_ctx = False
+        if msg.get("channel") == "activeAssetCtx" or msg.get("type") == "activeAssetCtx":
+            is_active_ctx = True
+        data_field = msg.get("data") or msg.get("result")
+        if isinstance(data_field, dict) and data_field.get("type") == "activeAssetCtx":
+            is_active_ctx = True
+        if isinstance(payload, dict) and (payload.get("type") == "activeAssetCtx" or ctx is not None):
+            is_active_ctx = True
+
         coin = payload.get("coin") or msg.get("coin")
+        if not coin and ctx:
+            coin = ctx.get("coin")
         if not coin:
             logger.debug("[WS_FEED][DEBUG] markPrice without coin: %s", msg)
             return
 
-        raw_mark = payload.get("markPx") or payload.get("mark") or payload.get("price") or msg.get("mark")
+        raw_mark = None
+        if is_active_ctx and ctx:
+            for key in ("markPx", "mark", "price"):
+                if key in ctx:
+                    raw_mark = ctx.get(key)
+                    break
+        if raw_mark is None:
+            raw_mark = (
+                payload.get("markPx")
+                or payload.get("mark")
+                or payload.get("price")
+                or msg.get("mark")
+            )
         try:
             mark = float(raw_mark)
         except Exception:

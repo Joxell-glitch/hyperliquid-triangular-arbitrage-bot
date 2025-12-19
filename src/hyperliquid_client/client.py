@@ -370,6 +370,13 @@ class HyperliquidClient:
                 if parsed_msg is None:
                     continue
 
+                if isinstance(parsed_msg, list):
+                    self._log_payload_shape(parsed_msg)
+                    for item in parsed_msg:
+                        if isinstance(item, dict):
+                            self._handle_ws_message(item)
+                    continue
+
                 for msg in self._iterate_payload(parsed_msg):
                     tracker = getattr(self, "feed_health_tracker", None)
                     if tracker:

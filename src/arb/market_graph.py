@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple
 
@@ -58,6 +59,9 @@ class MarketGraph:
         skipped_whitelist = 0
         skipped_blacklist = 0
         used_pairs = set()
+        quote_counter: Counter[str] = Counter()
+        base_counter: Counter[str] = Counter()
+        cross_quote_examples: List[str] = []
 
         for entry in pairs:
             pair_name = entry.get("pair")
@@ -84,6 +88,13 @@ class MarketGraph:
                 continue
             pair_name = pair_name or f"{base}/{quote}"
             used_pairs.add(pair_name)
+            base_counter[base] += 1
+            quote_counter[quote] += 1
+            if quote != "USD" and len(cross_quote_examples) < 20:
+                market_kind = entry.get("kind") or "unknown"
+                cross_quote_examples.append(
+                    f"{pair_name}|base={base} quote={quote} isPerp=False isSpot=True kind={market_kind}"
+                )
             if is_hyperliquid:
                 logger.info("[GRAPH][INFO] hyperliquid_market accepted base=%s quote=%s", base, quote)
             self.edges.append(Edge(base=base, quote=quote, pair=pair_name))
@@ -122,6 +133,15 @@ class MarketGraph:
             skipped_whitelist,
             skipped_blacklist,
         )
+        logger.info(
+            "[GRAPH_DIAG] quotes_top10=%s bases_top10=%s counts(total=%s active=%s used=%s)",
+            quote_counter.most_common(10),
+            base_counter.most_common(10),
+            markets_total,
+            markets_active,
+            len(used_pairs),
+        )
+        logger.info("[GRAPH_DIAG] cross_quote_examples=%s", cross_quote_examples)
         self._log_triangle_assets()
 
     def build_from_perp_meta(self, perp_meta: dict, max_sample_edges: int = 10) -> None:
@@ -138,6 +158,8 @@ class MarketGraph:
         skipped_whitelist = 0
         skipped_blacklist = 0
         used_pairs = set()
+        quote_counter: Counter[str] = Counter()
+        base_counter: Counter[str] = Counter()
 
         for entry in pairs:
             symbol = (
@@ -159,6 +181,8 @@ class MarketGraph:
                 continue
             pair_name = f"{base}-PERP"
             used_pairs.add(pair_name)
+            base_counter[base] += 1
+            quote_counter[quote] += 1
             self.edges.append(Edge(base=base, quote=quote, pair=pair_name))
             self.edges.append(Edge(base=quote, quote=base, pair=pair_name))
 
@@ -195,6 +219,15 @@ class MarketGraph:
             skipped_whitelist,
             skipped_blacklist,
         )
+        logger.info(
+            "[GRAPH_DIAG] quotes_top10=%s bases_top10=%s counts(total=%s active=%s used=%s)",
+            quote_counter.most_common(10),
+            base_counter.most_common(10),
+            markets_total,
+            markets_active,
+            len(used_pairs),
+        )
+        logger.info("[GRAPH_DIAG] cross_quote_examples=%s", [])
         self._log_triangle_assets()
 
     def _enumerate_triangles(self) -> List[Triangle]:
@@ -242,6 +275,24 @@ class MarketGraph:
             skipped_same_node,
         )
         if not triangles:
+            out_degree: Counter[str] = Counter()
+            in_degree: Counter[str] = Counter()
+            total_degree: Counter[str] = Counter()
+            for edge in self.edges:
+                out_degree[edge.base] += 1
+                in_degree[edge.quote] += 1
+                total_degree[edge.base] += 1
+                total_degree[edge.quote] += 1
+            total_edges = len(self.edges)
+            top_node, top_degree = (total_degree.most_common(1)[0] if total_degree else ("", 0))
+            star_like = total_edges > 0 and (top_degree / total_edges) > 0.8
+            logger.info(
+                "[TRI_ENUM_DIAG] out_top10=%s in_top10=%s star_like=%s top_node=%s",
+                out_degree.most_common(10),
+                in_degree.most_common(10),
+                star_like,
+                top_node,
+            )
             reasons = []
             if nodes_count == 0:
                 reasons.append("nodes=0")

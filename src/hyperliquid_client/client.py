@@ -86,6 +86,8 @@ class HyperliquidClient:
         self._first_data_event = asyncio.Event()
         self._payload_shape_logged = False
         self._payload_type_warned = False
+        self._spot_meta_cache: Optional[Any] = None
+        self._spot_meta_cache_time: float = 0.0
         self._connected_event_market = asyncio.Event()
         self._connected_event_books = asyncio.Event()
         self._connected_event_books.set()
@@ -126,6 +128,18 @@ class HyperliquidClient:
         resp = await self._session.post(url, json={"type": "spotMeta"})
         resp.raise_for_status()
         return resp.json()
+
+    async def fetch_spot_meta_and_asset_ctxs(self, use_cache: bool = True) -> Dict[str, Any]:
+        now = time.time()
+        if use_cache and self._spot_meta_cache and now - self._spot_meta_cache_time < 60:
+            return self._spot_meta_cache
+        url = f"{self.rest_base}{self.api_settings.info_path}"
+        resp = await self._session.post(url, json={"type": "spotMetaAndAssetCtxs"})
+        resp.raise_for_status()
+        data = resp.json()
+        self._spot_meta_cache = data
+        self._spot_meta_cache_time = now
+        return data
 
     async def fetch_perp_meta(self) -> Dict[str, Any]:
         """
@@ -201,6 +215,8 @@ class HyperliquidClient:
         items = items[:BOOKS_SOCKET_CAP]
 
         for coin, base in items:
+            ws_snapshot_coin = coin
+            fallback_coin: Optional[str] = None
             if kind == "perp":
                 perp_key = f"perp:{coin}"
                 self._perp_subscriptions.add(perp_key)
@@ -209,7 +225,15 @@ class HyperliquidClient:
                 spot_key = f"spot:{coin}"
                 self._spot_subscriptions.add(spot_key)
                 self._spot_symbol_to_base[coin] = base
-                self._spot_pair_map[coin] = base
+                pair = base if "/" in base else f"{base}/USDC"
+                self._spot_pair_map[coin] = pair
+                self._spot_symbol_to_base[pair] = base
+                primary_coin, fallback_coin = await self._resolve_spot_ws_coin(coin, pair)
+                if primary_coin:
+                    self._spot_symbol_to_base[primary_coin] = base
+                    ws_snapshot_coin = primary_coin
+                if fallback_coin and fallback_coin != primary_coin:
+                    self._spot_symbol_to_base[fallback_coin] = base
 
             await self._ensure_books_runner(coin)
             await self._books_connected_events[coin].wait()
@@ -226,7 +250,8 @@ class HyperliquidClient:
             logger.info("[WS_BOOKS_%s] subscribing single l2Book: %s (%s)", coin, coin, kind)
 
             try:
-                snapshot = await self.fetch_orderbook_snapshot(coin)
+                snapshot_coin = coin if kind == "perp" else ws_snapshot_coin
+                snapshot = await self.fetch_orderbook_snapshot(snapshot_coin)
                 payload = self._extract_payload(snapshot)
                 levels = payload.get("levels") or payload
 
@@ -277,11 +302,76 @@ class HyperliquidClient:
                     best_ask,
                 )
             except Exception as exc:
-                logger.warning("[WS_BOOKS_%s][BOOTSTRAP] snapshot failed: %s", coin, exc)
+                if kind == "spot" and fallback_coin and fallback_coin != ws_snapshot_coin:
+                    try:
+                        logger.info(
+                            "[WS_BOOKS_%s][BOOTSTRAP] retrying snapshot with fallback coin=%s after %s",
+                            coin,
+                            fallback_coin,
+                            type(exc).__name__,
+                        )
+                        snapshot = await self.fetch_orderbook_snapshot(fallback_coin)
+                        payload = self._extract_payload(snapshot)
+                        levels = payload.get("levels") or payload
+
+                        bids_source = levels.get("bids") if isinstance(levels, dict) else None
+                        asks_source = levels.get("asks") if isinstance(levels, dict) else None
+                        if isinstance(levels, (list, tuple)) and len(levels) >= 2:
+                            bids_source, asks_source = levels[0], levels[1]
+
+                        bids = (
+                            bids_source
+                            if isinstance(bids_source, list)
+                            else payload.get("bids")
+                            if isinstance(payload.get("bids"), list)
+                            else []
+                        )
+                        asks = (
+                            asks_source
+                            if isinstance(asks_source, list)
+                            else payload.get("asks")
+                            if isinstance(payload.get("asks"), list)
+                            else []
+                        )
+                        best_bid = self._best_price(bids, reverse=True)
+                        best_ask = self._best_price(asks, reverse=False)
+                        best_bid = float(best_bid) if best_bid is not None else 0.0
+                        best_ask = float(best_ask) if best_ask is not None else 0.0
+                        ts = (
+                            payload.get("time")
+                            or payload.get("ts")
+                            or payload.get("timestamp")
+                            or time.time()
+                        )
+                        norm = {
+                            "bid": best_bid,
+                            "ask": best_ask,
+                            "bids": bids,
+                            "asks": asks,
+                            "ts": ts,
+                        }
+                        target_cache = self._orderbooks_spot
+                        target_cache[base] = norm
+                        logger.info(
+                            "[WS_BOOKS_%s][BOOTSTRAP] applied snapshot kind=%s bid=%s ask=%s (fallback coin=%s)",
+                            coin,
+                            kind,
+                            best_bid,
+                            best_ask,
+                            fallback_coin,
+                        )
+                    except Exception as snapshot_exc:  # pragma: no cover - defensive
+                        logger.warning(
+                            "[WS_BOOKS_%s][BOOTSTRAP] snapshot failed after fallback: %s",
+                            coin,
+                            snapshot_exc,
+                        )
+                else:
+                    logger.warning("[WS_BOOKS_%s][BOOTSTRAP] snapshot failed: %s", coin, exc)
 
             if kind == "spot":
                 spot_pair = self._spot_pair_map.get(coin) or base
-                await self._subscribe_spot_books(coin, spot_pair)
+                await self._subscribe_spot_books(coin, spot_pair, (ws_snapshot_coin, fallback_coin))
             else:
                 await self._subscribe_books(coin, kind, coin)
 
@@ -788,7 +878,9 @@ class HyperliquidClient:
         )
         await asyncio.sleep(self._subscribe_delay_ms / 1000.0)
 
-    async def _subscribe_spot_books(self, asset: str, spot_pair: str) -> None:
+    async def _subscribe_spot_books(
+        self, asset: str, spot_pair: str, resolved: Optional[tuple[str, str]] = None
+    ) -> None:
         if os.getenv("HL_DISABLE_L2BOOK", "0") == "1":
             logger.info("[WS_FEED] HL_DISABLE_L2BOOK=1 -> skipping l2Book subscriptions")
             return
@@ -796,7 +888,10 @@ class HyperliquidClient:
             logger.info("[WS_FEED] HL_DISABLE_SPOT_L2BOOK=1 -> skipping spot l2Book")
             return
 
-        primary_coin, fallback_coin = self._resolve_spot_ws_coin(spot_pair)
+        if resolved is not None:
+            primary_coin, fallback_coin = resolved
+        else:
+            primary_coin, fallback_coin = await self._resolve_spot_ws_coin(asset, spot_pair)
         asset_key = self._spot_symbol_to_base.get(asset, spot_pair) or asset
         if fallback_coin:
             self._spot_symbol_to_base.setdefault(fallback_coin, asset_key)
@@ -1303,7 +1398,55 @@ class HyperliquidClient:
 
     SPECIAL_SPOT_WS_CANONICAL = {"PURR/USDC"}
 
-    def _resolve_spot_ws_coin(self, spot_pair: str) -> tuple[str, str]:
+    async def _resolve_spot_ws_coin(self, asset: str, spot_pair: str) -> tuple[str, str]:
+        asset_key = self._spot_symbol_to_base.get(asset, asset)
+        existing = self._spot_ws_coin_choice.get(asset_key)
+        if existing:
+            return existing, existing
+
+        resolved = await self._resolve_spot_ws_coin_from_universe(asset_key, spot_pair)
+        if resolved:
+            self._spot_ws_coin_choice[asset_key] = resolved
+            self._spot_symbol_to_base.setdefault(resolved, asset_key)
+            return resolved, resolved
+
+        primary, fallback = self._legacy_resolve_spot_ws_coin(spot_pair)
+        self._spot_ws_coin_choice.setdefault(asset_key, primary)
+        self._spot_symbol_to_base.setdefault(primary, asset_key)
+        if fallback != primary:
+            self._spot_symbol_to_base.setdefault(fallback, asset_key)
+        return primary, fallback
+
+    async def _resolve_spot_ws_coin_from_universe(self, asset: str, spot_pair: str) -> Optional[str]:
+        pair = (spot_pair or f"{asset}/USDC").upper()
+        try:
+            meta = await self.fetch_spot_meta_and_asset_ctxs()
+        except Exception as exc:
+            logger.warning("[WS_BOOKS_%s][WARN] failed to fetch spotMetaAndAssetCtxs: %s", asset, exc)
+            return None
+
+        universe = None
+        if isinstance(meta, list) and meta and isinstance(meta[0], dict):
+            universe = meta[0].get("universe")
+        elif isinstance(meta, dict):
+            universe = meta.get("universe")
+
+        ws_coin = self.extract_spot_ws_coin_from_universe(universe, pair)
+        if ws_coin is None:
+            return None
+
+        index_val = ws_coin.lstrip("@")
+        logger.info(
+            "[WS_BOOKS_%s][INFO] SPOT WS coin resolved asset=%s pair=%s ws_coin=%s index=%s",
+            asset,
+            asset,
+            pair,
+            ws_coin,
+            index_val,
+        )
+        return ws_coin
+
+    def _legacy_resolve_spot_ws_coin(self, spot_pair: str) -> tuple[str, str]:
         """
         Resolve the coin string to use for spot l2Book subscriptions.
 
@@ -1327,6 +1470,24 @@ class HyperliquidClient:
 
         fallback = f"{base}/{quote}"
         return primary, fallback
+
+    @staticmethod
+    def extract_spot_ws_coin_from_universe(
+        universe: Optional[Iterable[Dict[str, Any]]], spot_pair: str
+    ) -> Optional[str]:
+        if not isinstance(universe, Iterable):
+            return None
+        for entry in universe:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("name") != spot_pair:
+                continue
+            try:
+                index_val = int(entry.get("index"))
+            except Exception:
+                return None
+            return f"@{index_val}"
+        return None
 
     def _get_subscribe_delay_ms(self) -> int:
         try:

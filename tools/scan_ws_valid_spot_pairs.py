@@ -34,6 +34,10 @@ class SpotPair:
     index: int
 
 
+def ws_coin_candidates(pair: SpotPair) -> list[str]:
+    return [f"@{pair.index}", pair.pair]
+
+
 @dataclass
 class ScanResult:
     pair: SpotPair
@@ -92,16 +96,23 @@ def extract_spot_pairs(spot_meta: Dict[str, Any]) -> List[SpotPair]:
             continue
         base = str(base).upper()
         quote = str(entry.get("quote") or "USDC").upper()
-        pair_name = entry.get("pair") or f"{base}/{quote}"
-        if "/" not in str(pair_name):
-            pair_name = f"{pair_name}/{quote}"
-        pair_name = str(pair_name).upper()
+        canonical_pair = entry.get("pair")
+        if canonical_pair is None and isinstance(entry.get("name"), str) and "/" in entry["name"]:
+            canonical_pair = entry["name"]
+        if canonical_pair is None:
+            canonical_pair = f"{base}/{quote}"
+        canonical_pair = str(canonical_pair).upper()
         pair_index = entry.get("index")
         try:
             index = int(pair_index) if pair_index is not None else int(idx)
         except Exception:
             index = int(idx)
-        pairs.append(SpotPair(base=base, quote=quote, pair=pair_name, index=index))
+        if "/" in canonical_pair:
+            base_sym, quote_sym = canonical_pair.split("/", 1)
+            pairs.append(SpotPair(base=base_sym, quote=quote_sym, pair=canonical_pair, index=index))
+        else:
+            pair_name = f"{base}/{quote}"
+            pairs.append(SpotPair(base=base, quote=quote, pair=pair_name, index=index))
     return pairs
 
 
@@ -156,26 +167,30 @@ async def subscribe_and_wait(ws_url: str, coin: str, timeout: float) -> Tuple[bo
 
 
 async def scan_pair(ws_url: str, pair: SpotPair, timeout: float) -> ScanResult:
-    primary_coin = f"@{pair.index}"
+    candidates = ws_coin_candidates(pair)
+    primary_coin = candidates[0]
     ok_primary, err_primary = await subscribe_and_wait(ws_url, primary_coin, timeout)
     if ok_primary:
         return ScanResult(pair=pair, ok=True, fallback_used=False, primary_error=None, fallback_error=None)
 
-    fallback_coin = f"{pair.base}/{pair.quote}"
-    ok_fallback, err_fallback = await subscribe_and_wait(ws_url, fallback_coin, timeout)
+    fallback_error = None
+    ok_fallback = False
+    if len(candidates) > 1:
+        fallback_coin = candidates[1]
+        ok_fallback, fallback_error = await subscribe_and_wait(ws_url, fallback_coin, timeout)
     return ScanResult(
         pair=pair,
         ok=ok_fallback,
         fallback_used=ok_fallback,
         primary_error=err_primary,
-        fallback_error=err_fallback,
+        fallback_error=fallback_error,
     )
 
 
 def print_result(result: ScanResult) -> None:
     status = "OK"
     if result.ok and result.fallback_used:
-        status = "OK (fallback BASE/QUOTE)"
+        status = "OK (fallback CANONICAL)"
     elif not result.ok:
         status = "FAIL"
 

@@ -98,6 +98,7 @@ def apply_env_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
     raw["network"] = env.get("NETWORK", raw.get("network", "mainnet"))
 
     raw.setdefault("trading", {})
+    raw["trading"].setdefault("spot_pair_overrides", {})
     raw["trading"]["max_assets_per_ws"] = int(
         env.get("TRADING_MAX_ASSETS_PER_WS", raw["trading"].get("max_assets_per_ws", 50))
     )

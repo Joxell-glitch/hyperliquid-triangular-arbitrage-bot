@@ -227,7 +227,12 @@ class HyperliquidClient:
                 )
         await self._connected_event.wait()
 
-    async def subscribe_orderbooks(self, symbol_map: Dict[str, str], kind: str = "spot") -> None:
+    async def subscribe_orderbooks(
+        self,
+        symbol_map: Dict[str, str],
+        kind: str = "spot",
+        spot_pair_overrides: Optional[Dict[str, str]] = None,
+    ) -> None:
         if os.getenv("HL_DISABLE_L2BOOK", "0") == "1":
             logger.info("[WS_FEED] HL_DISABLE_L2BOOK=1 -> skipping l2Book subscriptions")
             return
@@ -257,10 +262,12 @@ class HyperliquidClient:
                 self._perp_subscriptions.add(perp_key)
                 self._perp_symbol_to_base[coin] = base
             else:
+                pair_override = spot_pair_overrides.get(coin) if spot_pair_overrides else None
                 spot_key = f"spot:{coin}"
                 self._spot_subscriptions.add(spot_key)
                 self._spot_symbol_to_base[coin] = base
-                pair = base if "/" in base else f"{base}/USDC"
+                raw_pair = pair_override or (base if "/" in base else f"{base}/USDC")
+                pair = raw_pair.upper()
                 self._spot_pair_map[coin] = pair
                 self._spot_symbol_to_base[pair] = base
                 primary_coin, fallback_coin = await self._resolve_spot_ws_coin(coin, pair)
@@ -453,20 +460,30 @@ class HyperliquidClient:
         coins_spot: Iterable[str],
         coins_perp: Iterable[str],
         coins_mark: Iterable[str],
+        *,
+        spot_symbol_map: Optional[Dict[str, str]] = None,
+        spot_pair_overrides: Optional[Dict[str, str]] = None,
     ) -> None:
         coins_spot_list = list(coins_spot)
         coins_perp_list = list(coins_perp)
         coins_mark_list = list(coins_mark)
-        self._tracked_bases.update(coins_spot_list)
-        self._tracked_bases.update(coins_perp_list)
-        self._tracked_bases.update(coins_mark_list)
-        spot_symbols = {self._normalize_spot_symbol(base): base for base in coins_spot_list}
+        spot_symbols = spot_symbol_map or {
+            self._normalize_spot_symbol(symbol): symbol for symbol in coins_spot_list
+        }
         perp_symbols = {self._normalize_perp_symbol(base): base for base in coins_perp_list}
+        mark_symbols = {self._normalize_perp_symbol(base): base for base in coins_mark_list}
+        self._tracked_bases.update(spot_symbols.values())
+        self._tracked_bases.update(perp_symbols.values())
+        self._tracked_bases.update(mark_symbols.values())
+        normalized_spot_pairs = None
+        if spot_pair_overrides:
+            normalized_spot_pairs = {
+                self._normalize_spot_symbol(symbol): pair for symbol, pair in spot_pair_overrides.items()
+            }
         await self.connect_ws()
         if coins_mark_list:
-            mark_symbols = {self._normalize_perp_symbol(base): base for base in coins_mark_list}
             await self.subscribe_mark_prices(mark_symbols)
-        await self.subscribe_orderbooks(spot_symbols, kind="spot")
+        await self.subscribe_orderbooks(spot_symbols, kind="spot", spot_pair_overrides=normalized_spot_pairs)
         await self.subscribe_orderbooks(perp_symbols, kind="perp")
 
     def _handle_ws_message(self, msg: Dict[str, Any]) -> None:

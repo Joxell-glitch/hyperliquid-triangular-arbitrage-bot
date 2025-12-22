@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -24,6 +24,7 @@ class TradingSettings:
     max_concurrent_triangles: int
     whitelist: List[str] = field(default_factory=list)
     blacklist: List[str] = field(default_factory=list)
+    spot_pair_overrides: Dict[str, str] = field(default_factory=dict)
     min_average_volume: float = 0.0
     max_spread_pct: float = 1.0
     top_n_opportunities: int = 20

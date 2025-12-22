@@ -18,6 +18,7 @@ trading:
   max_assets_per_ws: 50
   whitelist: []
   blacklist: []
+  spot_pair_overrides: {}
   min_average_volume: 0
   max_spread_pct: 0.01
 

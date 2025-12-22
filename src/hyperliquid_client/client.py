@@ -103,6 +103,9 @@ class HyperliquidClient:
         self._spot_pair_map: Dict[str, str] = {}
         self._spot_ws_coin_choice: Dict[str, str] = {}
         self._spot_l2book_events: Dict[str, asyncio.Event] = {}
+        self._books_first_l2book_seen: set[str] = set()
+        self._books_snapshot_applied: set[str] = set()
+        self._books_subscription_key_by_asset: Dict[str, str] = {}
         self._reconnect_counters: Dict[str, Any] = {
             "market": 0,
             "books": {},
@@ -356,6 +359,10 @@ class HyperliquidClient:
                         best_bid,
                         best_ask,
                     )
+                    self._books_snapshot_applied.add(base)
+                    if kind == "spot":
+                        spot_event = self._spot_l2book_events.setdefault(base, asyncio.Event())
+                        spot_event.set()
             except Exception as exc:
                 if kind == "spot" and fallback_coin and fallback_coin != ws_snapshot_coin:
                     try:
@@ -417,6 +424,9 @@ class HyperliquidClient:
                             best_ask,
                             fallback_coin,
                         )
+                        self._books_snapshot_applied.add(base)
+                        spot_event = self._spot_l2book_events.setdefault(base, asyncio.Event())
+                        spot_event.set()
                     except Exception as snapshot_exc:  # pragma: no cover - defensive
                         logger.warning(
                             "[WS_BOOKS_%s][BOOTSTRAP] snapshot failed after fallback: %s",
@@ -966,6 +976,7 @@ class HyperliquidClient:
             self._spot_symbol_to_base.setdefault(fallback_coin, asset_key)
         l2_event = self._spot_l2book_events.setdefault(asset_key, asyncio.Event())
         l2_event.clear()
+        snapshot_seen = asset_key in self._books_snapshot_applied
 
         payload_coin = primary_coin or fallback_coin or spot_pair
         if payload_coin == asset or (
@@ -977,6 +988,9 @@ class HyperliquidClient:
             self._spot_ws_coin_choice.setdefault(asset_key, payload_coin)
 
         sub_payload = {"type": "l2Book", "coin": payload_coin, "isPerp": False}
+        sub_key = self._build_l2book_key(payload_coin, False)
+        if sub_key:
+            self._books_subscription_key_by_asset[asset_key] = sub_key
         try:
             await self._send_subscribe_ws(
                 sub_payload,
@@ -1001,12 +1015,17 @@ class HyperliquidClient:
             False,
         )
         await asyncio.sleep(self._subscribe_delay_ms / 1000.0)
+        if snapshot_seen and sub_key:
+            l2_event.set()
+            self._mark_l2book_seen(sub_key, reason="snapshot", asset_label=asset_key)
         try:
             await asyncio.wait_for(l2_event.wait(), timeout=SPOT_L2BOOK_WAIT_SECONDS)
             if payload_coin:
                 self._spot_ws_coin_choice.setdefault(asset_key, payload_coin)
             return
         except asyncio.TimeoutError:
+            if sub_key and sub_key in self._books_first_l2book_seen:
+                return
             logger.warning(
                 "[WS_BOOKS_%s][WARN] no spot l2Book after %.1fs (subscription coin=%s isPerp=%s resolved=%s)",
                 asset_key,
@@ -1136,6 +1155,10 @@ class HyperliquidClient:
                 cb(kind, asset, norm)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("Orderbook listener error: %s", exc)
+
+        sub_key = self._build_l2book_key(coin, kind == "perp")
+        if sub_key:
+            self._mark_l2book_seen(sub_key, reason="first_l2book", asset_label=asset)
 
     def _handle_mark(self, msg: Dict[str, Any]) -> None:
         payload = self._extract_payload(msg)
@@ -1438,9 +1461,26 @@ class HyperliquidClient:
             for task_asset, task in list(self._books_watchdog_tasks.items()):
                 if task and not task.done():
                     task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await task
-                self._books_watchdog_tasks[task_asset] = None  # type: ignore[assignment]
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            self._books_watchdog_tasks[task_asset] = None  # type: ignore[assignment]
+
+    def _mark_l2book_seen(self, key: Optional[str], *, reason: str, asset_label: Optional[str] = None) -> None:
+        if not key:
+            return
+        if key in self._books_first_l2book_seen:
+            return
+        self._books_first_l2book_seen.add(key)
+        prefix = f"[WS_BOOKS_{asset_label}]" if asset_label else "[WS_BOOKS]"
+        logger.info("%s[WATCHDOG] disarmed key=%s reason=%s", prefix, key, reason)
+
+    def _build_l2book_key(self, coin: Optional[str], is_perp: bool) -> Optional[str]:
+        if not coin:
+            return None
+        try:
+            return json.dumps({"coin": coin, "isPerp": bool(is_perp), "type": "l2Book"}, sort_keys=True)
+        except Exception:
+            return None
 
     def _normalize_spot_symbol(self, base: str) -> str:
         # Hyperliquid spot l2Book expects the base coin, not a "BASE/USDC" pair string.

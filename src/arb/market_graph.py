@@ -343,7 +343,10 @@ class MarketGraph:
                 reasons.append("unknown")
             reason_str = ",".join(reasons)
             logger.info("[TRI_ENUM] triangles_zero_reasons=%s", reason_str)
-            self.last_triangle_stats["triangles_zero_reason"] = reason_str
+            if self.last_triangle_stats.get("triangles_zero_reason") == "no_cross_quotes_on_spot":
+                self.last_triangle_stats["triangles_zero_reason"] = "no_cross_quotes_on_spot"
+            else:
+                self.last_triangle_stats["triangles_zero_reason"] = reason_str
         return triangles
 
     @property

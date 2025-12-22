@@ -153,6 +153,11 @@ class SpotPerpPaperEngine:
         self.feed_health = feed_health_tracker or FeedHealthTracker(feed_health_settings)
         self.client.set_feed_health_tracker(self.feed_health)
         self.asset_state: Dict[str, AssetState] = {asset: AssetState() for asset in self.assets}
+        self._asset_spot_pairs: Dict[str, str] = {}
+        self._spot_symbol_map: Dict[str, str] = {}
+        self._spot_pair_overrides: Dict[str, str] = {}
+        self._spot_subscription_coins: List[str] = []
+        self._init_spot_proxy_maps()
         self._running = False
         self._heartbeat_interval = 10
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -203,6 +208,25 @@ class SpotPerpPaperEngine:
             for asset in self.assets
         }
 
+    def _init_spot_proxy_maps(self) -> None:
+        overrides = {key.upper(): value for key, value in (self.trading.spot_pair_overrides or {}).items()}
+        quote = (self.trading.quote_asset or "USDC").upper()
+        self._asset_spot_pairs.clear()
+        self._spot_symbol_map.clear()
+        self._spot_pair_overrides.clear()
+        self._spot_subscription_coins.clear()
+        for asset in self.assets:
+            default_pair = f"{asset}/{quote}"
+            override_pair = overrides.get(asset.upper())
+            pair = (override_pair or default_pair).upper()
+            self._asset_spot_pairs[asset] = pair
+            coin = pair.split("/")[0]
+            self._spot_symbol_map[coin] = asset
+            self._spot_pair_overrides[coin] = pair
+            if pair != default_pair:
+                logger.info("[SPOT_PROXY] %s -> %s", asset, pair)
+        self._spot_subscription_coins = list(self._spot_symbol_map.keys())
+
     async def run_forever(self, stop_event: Optional[asyncio.Event] = None) -> None:
         self._running = True
         logger.info(
@@ -215,7 +239,13 @@ class SpotPerpPaperEngine:
             self.would_trade,
             self.trace_every_seconds,
         )
-        await self.client.start_market_data(self.assets, self.assets, self.assets)
+        await self.client.start_market_data(
+            self._spot_subscription_coins,
+            self.assets,
+            self.assets,
+            spot_symbol_map=self._spot_symbol_map,
+            spot_pair_overrides=self._spot_pair_overrides,
+        )
 
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(stop_event))
         self._feed_health_task = asyncio.create_task(self._feed_health_loop(stop_event))

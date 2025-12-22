@@ -862,6 +862,21 @@ class SpotPerpPaperEngine:
         fee_spot = self.taker_fee_spot * notional
         fee_perp = self.taker_fee_perp * notional
         pnl_net = spread_gross * notional - fee_spot - fee_perp - funding_estimate
+        gross_pnl_est = spread_gross * notional
+        fee_est = fee_spot + fee_perp
+        slippage_est = getattr(self.trading, "safety_slippage_buffer", 0.0) * notional
+        qty = notional / spot_px if spot_px > 0 else 0.0
+        min_edge_threshold = getattr(self.trading, "min_edge_threshold", 0.0)
+        below_min_edge = spread_gross < min_edge_threshold
+        pnl_nonpos = pnl_net <= 0
+        decision = "PASS"
+        reject_reason = "OK"
+        if below_min_edge:
+            decision = "REJECT"
+            reject_reason = "BELOW_MIN_EDGE"
+        elif pnl_nonpos:
+            decision = "REJECT"
+            reject_reason = "PNL_NONPOS"
 
         logger.info(
             "[SPOT_PERP][INFO] compute_attempt asset=%s spot_price=%.6f perp_price=%.6f mark=%.6f "
@@ -878,6 +893,23 @@ class SpotPerpPaperEngine:
             direction=direction,
             expected_edge_bp=spread_gross * 10000 if spread_gross is not None else None,
             note=f"pnl_net_est={pnl_net:.6f}",
+        )
+        logger.info(
+            (
+                "[SPOT_PERP][FILTER] asset=%s spread_gross=%+.6f gross_pnl_est=%+.6f fee_est=%+.6f "
+                "slippage_est=%+.6f notional_usd=%.6f qty=%.6f pnl_net_est=%+.6f decision=%s "
+                "reason=%s"
+            ),
+            asset,
+            spread_gross,
+            gross_pnl_est,
+            fee_est,
+            slippage_est,
+            notional,
+            qty,
+            pnl_net,
+            decision,
+            reject_reason,
         )
 
         if spread_gross <= 0 or pnl_net <= 0:

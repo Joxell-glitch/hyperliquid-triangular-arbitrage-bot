@@ -65,14 +65,19 @@ class MarketGraph:
         token_map: Dict[int, str] = {}
 
         if is_hyperliquid:
-            for token in spot_meta.get("tokens", []):
+            tokens_sources = spot_meta.get("tokens", [])
+            spot_meta_data = spot_meta.get("spotMeta")
+            if isinstance(spot_meta_data, dict):
+                tokens_sources = tokens_sources + spot_meta_data.get("tokens", [])
+            for token in tokens_sources:
                 idx = token.get("index")
                 name = token.get("name")
                 if idx is not None and name:
                     token_map[idx] = str(name).upper()
+        is_hyperliquid_spot = is_hyperliquid and bool(token_map)
 
         for entry in pairs:
-            if is_hyperliquid:
+            if is_hyperliquid_spot:
                 entry_tokens = entry.get("tokens")
                 if not entry_tokens or len(entry_tokens) != 2:
                     skipped_missing_base += 1
@@ -88,6 +93,8 @@ class MarketGraph:
                     continue
             else:
                 base = entry.get("base") or entry.get("coin")
+                if is_hyperliquid and not is_hyperliquid_spot:
+                    base = base or entry.get("name") or entry.get("symbol")
                 quote = entry.get("quote") or quote_asset
                 if not base:
                     skipped_missing_base += 1
@@ -101,7 +108,7 @@ class MarketGraph:
                 skipped_blacklist += 1
                 continue
             pair_name = entry.get("pair")
-            if is_hyperliquid and entry.get("isCanonical"):
+            if is_hyperliquid_spot and entry.get("isCanonical"):
                 entry_name = entry.get("name")
                 if isinstance(entry_name, str) and "/" in entry_name:
                     pair_name = entry_name.upper()

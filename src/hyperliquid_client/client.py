@@ -188,6 +188,10 @@ class HyperliquidClient:
 
 
 
+            self._connected_event_books.set()
+
+
+
         return self._connected_event_books
 
 

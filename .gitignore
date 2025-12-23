@@ -22,3 +22,6 @@ import
 *.bak
 *.bak2
 
+
+# Local config backups
+config/*.bak*

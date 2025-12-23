@@ -18,6 +18,10 @@ from src.observability.feed_health import FeedHealthTracker
 
 logger = get_logger(__name__)
 
+HL_TIER_0_FEE_TAKER_SPOT = 0.001
+HL_TIER_0_FEE_TAKER_PERP = 0.0005
+HL_TIER_LABEL = "HL_TIER_0"
+
 
 @dataclass
 class BookSnapshot:
@@ -134,8 +138,8 @@ class SpotPerpPaperEngine:
         assets: Iterable[str],
         trading: TradingSettings,
         db_session_factory=get_session,
-        taker_fee_spot: float = 0.001,
-        taker_fee_perp: float = 0.0005,
+        taker_fee_spot: float = HL_TIER_0_FEE_TAKER_SPOT,
+        taker_fee_perp: float = HL_TIER_0_FEE_TAKER_PERP,
         feed_health_settings: Optional[FeedHealthSettings] = None,
         feed_health_tracker: Optional[FeedHealthTracker] = None,
         validation_settings: Optional[ValidationSettings] = None,
@@ -238,6 +242,12 @@ class SpotPerpPaperEngine:
             "[MODE] would_trade=%s trace_every_seconds=%.1f",
             self.would_trade,
             self.trace_every_seconds,
+        )
+        logger.info(
+            "[SPOT_PERP][INFO] fees fee_spot=%.6f fee_perp=%.6f fee_tier=%s",
+            self.taker_fee_spot,
+            self.taker_fee_perp,
+            HL_TIER_LABEL,
         )
         await self.client.start_market_data(
             self._spot_subscription_coins,
@@ -1071,8 +1081,8 @@ class SpotPerpPaperEngine:
 async def run_spot_perp_engine(
     assets: Iterable[str],
     settings: Optional[Settings] = None,
-    taker_fee_spot: float = 0.001,
-    taker_fee_perp: float = 0.0005,
+    taker_fee_spot: float = HL_TIER_0_FEE_TAKER_SPOT,
+    taker_fee_perp: float = HL_TIER_0_FEE_TAKER_PERP,
 ):  
     settings = settings or load_config("config/config.yaml")
     feed_health_settings = settings.observability.feed_health

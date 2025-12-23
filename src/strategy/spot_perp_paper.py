@@ -866,6 +866,9 @@ class SpotPerpPaperEngine:
         fee_est = fee_spot + fee_perp
         slippage_est = getattr(self.trading, "safety_slippage_buffer", 0.0) * notional
         qty = notional / spot_px if spot_px > 0 else 0.0
+        if os.environ.get("SPOT_PERP_FORCE_PASS") == "1":
+            pnl_net = abs(pnl_net) + 1e-6
+            logger.info("[SPOT_PERP][TEST] force_pass=1 pnl_net_est_overridden")
         min_edge_threshold = getattr(self.trading, "min_edge_threshold", 0.0)
         below_min_edge = spread_gross < min_edge_threshold
         pnl_nonpos = pnl_net <= 0

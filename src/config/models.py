@@ -34,6 +34,7 @@ class TradingSettings:
     spot_pair_overrides: Dict[str, str] = field(default_factory=dict)
     min_average_volume: float = 0.0
     max_spread_pct: float = 1.0
+    max_spot_spread_bps: float = 500.0
     top_n_opportunities: int = 20
     max_assets_per_ws: int = 50
 

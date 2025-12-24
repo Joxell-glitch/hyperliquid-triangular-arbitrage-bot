@@ -172,6 +172,7 @@ class SpotPerpPaperEngine:
         self.db_session_factory = db_session_factory
         self.feed_health = feed_health_tracker or FeedHealthTracker(feed_health_settings)
         self.client.set_feed_health_tracker(self.feed_health)
+        self.max_spot_spread_bps = float(getattr(trading, "max_spot_spread_bps", 500.0))
         self.asset_state: Dict[str, AssetState] = {asset: AssetState() for asset in self.assets}
         self._asset_spot_pairs: Dict[str, str] = {}
         self._spot_symbol_map: Dict[str, str] = {}
@@ -804,6 +805,13 @@ class SpotPerpPaperEngine:
         if state.spot_proxy > 0 and not state.spot.has_liquidity():
             spot_incomplete = False
 
+        spot_spread_ok = True
+        spot_spread_bps: Optional[float] = None
+        if not (state.spot_proxy > 0 and not state.spot.has_liquidity()):
+            if spot_bid > 0 and spot_ask > 0:
+                spot_spread_bps = (spot_ask - spot_bid) / spot_bid * 10000
+                spot_spread_ok = spot_spread_bps <= self.max_spot_spread_bps
+
         gates = {
             "has_spot_book": spot_available,
             "has_perp_book": state.perp.has_liquidity(),
@@ -812,10 +820,26 @@ class SpotPerpPaperEngine:
             "not_crossed": not snapshot.get("crossed"),
             "not_out_of_sync": not snapshot.get("out_of_sync"),
             "has_mark": state.mark_price > 0,
+            "spot_spread_ok": spot_spread_ok,
         }
 
         reason: Optional[str] = None
-        if spot_incomplete_raw:
+        if not spot_spread_ok:
+            if spot_spread_bps is None:
+                spot_spread_bps = 0.0
+            logger.debug(
+                (
+                    "[SPOT_PERP][SANITY] spot_spread_too_wide asset=%s spot_bid=%.6f "
+                    "spot_ask=%.6f spot_spread_bps=%.2f max=%.2f"
+                ),
+                asset,
+                spot_bid,
+                spot_ask,
+                spot_spread_bps,
+                self.max_spot_spread_bps,
+            )
+            reason = "spot_sanity_failed"
+        elif spot_incomplete_raw:
             reason = "spot_sanity_failed"
         elif not gates["has_mark"]:
             reason = "SKIP_NO_MARK"

@@ -249,6 +249,18 @@ class SpotPerpPaperEngine:
     def _resolve_fee_rate(mode: str, maker_rate: float, taker_rate: float) -> float:
         return maker_rate if str(mode).lower() == "maker" else taker_rate
 
+    @staticmethod
+    def _to_rate_maybe_bps(value: Optional[float]) -> float:
+        """Normalize rate inputs, treating values >= 1 as bps."""
+        if value is None:
+            return 0.0
+        if value <= 0:
+            return value
+        # Convention: values >= 1 are provided in bps; 0 < value < 1 are already rate.
+        if value >= 1:
+            return value / 10000
+        return value
+
     def _init_spot_proxy_maps(self) -> None:
         overrides = {key.upper(): value for key, value in (self.trading.spot_pair_overrides or {}).items()}
         quote = (self.trading.quote_asset or "USDC").upper()
@@ -1294,16 +1306,19 @@ class SpotPerpPaperEngine:
         fee_perp = fee_perp_rate * notional
         gross_pnl_est = spread_gross * notional
         fee_est = fee_spot + fee_perp
+        base_slip_bps = getattr(self.trading, "safety_slippage_base", 0.0)
         buffer_bps = getattr(self.trading, "safety_slippage_buffer", 0.0)
-        base_slip_bps = 0.5 * (spot_spread_bps + perp_spread_bps)
-        slippage_bps = base_slip_bps + buffer_bps
-        slippage_est = slippage_bps * notional
+        base_slip_rate = self._to_rate_maybe_bps(base_slip_bps)
+        buffer_rate = self._to_rate_maybe_bps(buffer_bps)
+        slippage_rate = base_slip_rate + buffer_rate
+        slippage_est = slippage_rate * notional
         pnl_net = gross_pnl_est - fee_est - slippage_est - funding_estimate
         total_cost_bps = (fee_est + slippage_est) / notional if notional > 0 else 0.0
         edge_bps = spread_gross * 10000
         min_edge_threshold = getattr(self.trading, "min_edge_threshold", 0.0)
-        min_edge_bps = min_edge_threshold * 10000
-        effective_threshold = max(min_edge_threshold, total_cost_bps)
+        min_edge_rate = self._to_rate_maybe_bps(min_edge_threshold)
+        min_edge_bps = min_edge_rate * 10000
+        effective_threshold = max(min_edge_rate, total_cost_bps)
         effective_threshold_bps = effective_threshold * 10000
         qty = notional / spot_px if spot_px > 0 else 0.0
         if os.environ.get("SPOT_PERP_FORCE_PASS") == "1":
@@ -1350,9 +1365,11 @@ class SpotPerpPaperEngine:
             (
                 "[SPOT_PERP][FILTER] asset=%s spread_gross=%+.6f edge_bps=%.2f min_edge_bps=%.2f "
                 "effective_threshold_bps=%.2f spot_spread_bps=%.2f perp_spread_bps=%.2f buffer_bps=%.2f "
-                "gross_pnl_est=%+.6f fee_est=%+.6f slippage_est=%+.6f total_cost_bps=%+.6f notional_usd=%.6f "
-                "qty=%.6f pnl_net_est=%+.6f decision=%s reason=%s fee_mode=%s spot_fee_mode=%s "
-                "perp_fee_mode=%s fee_spot_rate=%.6f fee_perp_rate=%.6f fee_spot_source=%s fee_perp_source=%s"
+                "base_slip_input=%.6f buffer_input=%.6f base_slip_rate=%.6f buffer_rate=%.6f "
+                "slippage_rate=%.6f min_edge_input=%.6f min_edge_rate=%.6f gross_pnl_est=%+.6f "
+                "fee_est=%+.6f slippage_est=%+.6f total_cost_bps=%+.6f notional_usd=%.6f qty=%.6f "
+                "pnl_net_est=%+.6f decision=%s reason=%s fee_mode=%s spot_fee_mode=%s perp_fee_mode=%s "
+                "fee_spot_rate=%.6f fee_perp_rate=%.6f fee_spot_source=%s fee_perp_source=%s"
             ),
             asset,
             spread_gross,
@@ -1362,6 +1379,13 @@ class SpotPerpPaperEngine:
             spot_spread_bps * 10000,
             perp_spread_bps * 10000,
             buffer_bps * 10000,
+            base_slip_bps,
+            buffer_bps,
+            base_slip_rate,
+            buffer_rate,
+            slippage_rate,
+            min_edge_threshold,
+            min_edge_rate,
             gross_pnl_est,
             fee_est,
             slippage_est,

@@ -42,7 +42,7 @@ def _build_engine():
 def test_evaluate_gates_marks_missing_returns_skip():
     engine = _build_engine()
     state = AssetState(
-        spot=BookSnapshot(best_bid=10, best_ask=11),
+        spot=BookSnapshot(best_bid=10, best_ask=10.4),
         perp=BookSnapshot(best_bid=9, best_ask=10),
         mark_price=0.0,
     )
@@ -64,7 +64,7 @@ def test_evaluate_gates_marks_missing_returns_skip():
 def test_evaluate_gates_incomplete_books_returns_skip_incomplete():
     engine = _build_engine()
     state = AssetState(
-        spot=BookSnapshot(best_bid=10, best_ask=11),
+        spot=BookSnapshot(best_bid=10, best_ask=10.4),
         perp=BookSnapshot(best_bid=9, best_ask=10),
         mark_price=100.0,
     )
@@ -86,7 +86,7 @@ def test_evaluate_gates_incomplete_books_returns_skip_incomplete():
 def test_evaluate_gates_all_good_ready():
     engine = _build_engine()
     state = AssetState(
-        spot=BookSnapshot(best_bid=10, best_ask=11),
+        spot=BookSnapshot(best_bid=10, best_ask=10.4),
         perp=BookSnapshot(best_bid=9, best_ask=10),
         mark_price=100.0,
     )
@@ -102,3 +102,25 @@ def test_evaluate_gates_all_good_ready():
     ready, reason, _ = engine._evaluate_gates("BTC", snapshot, state)
     assert ready is True
     assert reason is None
+
+
+def test_evaluate_gates_spot_spread_sanity_blocks():
+    engine = _build_engine()
+    state = AssetState(
+        spot=BookSnapshot(best_bid=1.0, best_ask=1.2),
+        perp=BookSnapshot(best_bid=0.9, best_ask=1.0),
+        mark_price=100.0,
+    )
+    snapshot = {
+        "spot_incomplete": False,
+        "perp_incomplete": False,
+        "stale": False,
+        "crossed": False,
+        "out_of_sync": False,
+        "spot_age_ms": 1.0,
+        "perp_age_ms": 1.0,
+    }
+    ready, reason, details = engine._evaluate_gates("BTC", snapshot, state)
+    assert ready is False
+    assert reason == "spot_sanity_failed"
+    assert details["gates"]["spot_spread_ok"] is False

@@ -267,3 +267,60 @@ def test_auto_assets_preflight_requires_positive_spread(bid, ask, expected):
     )
 
     assert filtered == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (5, 0.0005),
+        (0.0005, 0.0005),
+        (0, 0),
+        (-1, -1),
+        (1, 0.0001),
+    ],
+)
+def test_to_rate_maybe_bps(value, expected):
+    assert SpotPerpPaperEngine._to_rate_maybe_bps(value) == expected
+
+
+def test_slippage_estimate_handles_bps_inputs():
+    trading_settings = TradingSettings(
+        quote_asset="USDC",
+        initial_quote_balance=1000.0,
+        min_position_size=100.0,
+        max_position_size=200.0,
+        min_edge_threshold=0.0,
+        safety_slippage_buffer=0.0,
+        max_concurrent_triangles=1,
+        fee_mode="maker",
+        spot_fee_mode="maker",
+        perp_fee_mode="maker",
+        maker_fee_spot=0.0,
+        maker_fee_perp=0.0,
+    )
+    setattr(trading_settings, "safety_slippage_base", 5)
+    engine = SpotPerpPaperEngine(
+        DummyClient(),
+        assets=["AAA"],
+        trading=trading_settings,
+        feed_health_settings=FeedHealthSettings(),
+    )
+    engine._evaluate_gates = lambda *_args, **_kwargs: (True, "", {})
+    engine._record_maker_probe = lambda **_kwargs: None
+    engine._log_decision_trace = lambda *_args, **_kwargs: None
+    capture = {"note": None}
+
+    def _capture_would_trade(*_args, **kwargs):
+        capture["note"] = kwargs.get("note")
+
+    engine._log_would_trade = _capture_would_trade
+    engine.asset_state["AAA"].spot = BookSnapshot(best_bid=100.0, best_ask=100.0)
+    engine.asset_state["AAA"].perp = BookSnapshot(best_bid=100.0, best_ask=100.0)
+    engine.asset_state["AAA"].mark_price = 100.0
+    engine.asset_state["AAA"].funding_rate = 0.0
+
+    engine._evaluate_and_record("AAA")
+
+    assert capture["note"] is not None
+    pnl_net = float(capture["note"].split("pnl_net_est=")[-1])
+    assert pnl_net == pytest.approx(-0.05, rel=0, abs=1e-9)

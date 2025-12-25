@@ -293,6 +293,19 @@ class SpotPerpPaperEngine:
             "true",
             "yes",
         )
+        self._maker_probe_always_enabled = os.getenv("SPOT_PERP_MAKER_PROBE_ALWAYS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self._maker_probe_always_rate_limit_ms = 2000
+        self._maker_probe_always_last_ts: Dict[str, int] = {asset: 0 for asset in self.assets}
+        self._maker_probe_always_last_log_ts: Dict[str, int] = {asset: 0 for asset in self.assets}
+        logger.debug(
+            "[SPOT_PERP][MAKER_PROBE] always=%s always_rate_limit_ms=%s",
+            "true" if self._maker_probe_always_enabled else "false",
+            self._maker_probe_always_rate_limit_ms,
+        )
         if self._maker_probe_persistence_enabled:
             self._ensure_maker_probe_table()
 
@@ -360,6 +373,8 @@ class SpotPerpPaperEngine:
             }
             self._maker_probe_history[asset] = {"spot": None, "perp": None}
             self._maker_probe_skip_logged[asset] = False
+            self._maker_probe_always_last_ts[asset] = 0
+            self._maker_probe_always_last_log_ts[asset] = 0
         if new_assets:
             self._init_spot_proxy_maps()
         return new_assets
@@ -391,6 +406,8 @@ class SpotPerpPaperEngine:
         self._trace_state.pop(asset, None)
         self._maker_probe_history.pop(asset, None)
         self._maker_probe_skip_logged.pop(asset, None)
+        self._maker_probe_always_last_ts.pop(asset, None)
+        self._maker_probe_always_last_log_ts.pop(asset, None)
 
     async def _run_auto_assets_warmup(self) -> None:
         if not self.auto_assets_enabled or not self.assets:
@@ -454,6 +471,8 @@ class SpotPerpPaperEngine:
         self._trace_state.pop(asset, None)
         self._maker_probe_history.pop(asset, None)
         self._maker_probe_skip_logged.pop(asset, None)
+        self._maker_probe_always_last_ts.pop(asset, None)
+        self._maker_probe_always_last_log_ts.pop(asset, None)
 
     async def _preflight_filter_assets_for_spot_book(
         self,
@@ -711,6 +730,42 @@ class SpotPerpPaperEngine:
             if not self._maker_probe_warned:
                 logger.warning("[SPOT_PERP][MAKER_PROBE] persist_failed", exc_info=True)
                 self._maker_probe_warned = True
+
+    def _maybe_record_maker_probe_always(self, edge_snapshot: SpotPerpEdgeSnapshot) -> None:
+        if not self._maker_probe_always_enabled:
+            return
+        if (
+            edge_snapshot.spot_bid is None
+            or edge_snapshot.spot_ask is None
+            or edge_snapshot.perp_bid is None
+            or edge_snapshot.perp_ask is None
+        ):
+            return
+        asset = edge_snapshot.asset
+        ts_ms = now_ms()
+        last_ts = self._maker_probe_always_last_ts.get(asset, 0)
+        if ts_ms - last_ts < self._maker_probe_always_rate_limit_ms:
+            last_log = self._maker_probe_always_last_log_ts.get(asset, 0)
+            if ts_ms - last_log >= 60000:
+                logger.debug(
+                    "[SPOT_PERP][MAKER_PROBE] always_rate_limited asset=%s elapsed_ms=%s limit_ms=%s",
+                    asset,
+                    ts_ms - last_ts,
+                    self._maker_probe_always_rate_limit_ms,
+                )
+                self._maker_probe_always_last_log_ts[asset] = ts_ms
+            return
+        self._maker_probe_always_last_ts[asset] = ts_ms
+        self._record_maker_probe(
+            asset=asset,
+            direction=edge_snapshot.direction,
+            spot_px=edge_snapshot.spot_price,
+            perp_px=edge_snapshot.perp_price,
+            spot_bid=edge_snapshot.spot_bid,
+            spot_ask=edge_snapshot.spot_ask,
+            perp_bid=edge_snapshot.perp_bid,
+            perp_ask=edge_snapshot.perp_ask,
+        )
 
     def _log_recent_maker_probes(self, session) -> None:
         rows = (
@@ -1552,6 +1607,7 @@ class SpotPerpPaperEngine:
             return
 
         edge_snapshot = self._build_edge_snapshot(asset, state)
+        self._maybe_record_maker_probe_always(edge_snapshot)
         spot_label = "spot_ask" if edge_snapshot.direction == "spot_long" else "spot_bid"
         perp_label = "perp_bid" if edge_snapshot.direction == "spot_long" else "perp_ask"
         fee_spot_source = "config" if self.spot_fee_mode == "maker" else "fallback"

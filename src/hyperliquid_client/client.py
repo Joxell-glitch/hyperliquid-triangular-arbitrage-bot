@@ -602,7 +602,7 @@ class HyperliquidClient:
             self._first_data_logged = True
             channel = msg.get("channel") or msg.get("type") or "unknown"
             logger.info("[WS_FEED][INFO] first_data_received channel=%s", channel)
-            self._first_data_event.set()
+            self._get_first_data_event().set()
 
         if msg.get("channel") == "subscriptionResponse" or msg.get("type") == "subscriptionResponse":
             logger.info("[WS_FEED][INFO] subscriptionResponse msg=%s", msg)

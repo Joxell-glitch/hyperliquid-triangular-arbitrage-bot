@@ -298,15 +298,15 @@ class SpotPerpPaperEngine:
             "true",
             "yes",
         )
-        self._maker_probe_always_rate_limit_ms = int(
-            os.getenv("SPOT_PERP_MAKER_PROBE_ALWAYS_INTERVAL_MS", "2000")
+        self._maker_probe_always_interval_ms = int(
+            os.getenv("SPOT_PERP_MAKER_PROBE_ALWAYS_INTERVAL_MS", "750")
         )
         self._maker_probe_always_last_ts: Dict[str, int] = {asset: 0 for asset in self.assets}
         self._maker_probe_always_last_log_ts: Dict[str, int] = {asset: 0 for asset in self.assets}
-        logger.debug(
-            "[SPOT_PERP][MAKER_PROBE] always=%s always_rate_limit_ms=%s",
+        logger.info(
+            "[SPOT_PERP][MAKER_PROBE] always_enabled=%s interval_ms=%s",
             "true" if self._maker_probe_always_enabled else "false",
-            self._maker_probe_always_rate_limit_ms,
+            self._maker_probe_always_interval_ms,
         )
         if self._maker_probe_persistence_enabled:
             self._ensure_maker_probe_table()
@@ -746,16 +746,7 @@ class SpotPerpPaperEngine:
         asset = edge_snapshot.asset
         ts_ms = now_ms()
         last_ts = self._maker_probe_always_last_ts.get(asset, 0)
-        if ts_ms - last_ts < self._maker_probe_always_rate_limit_ms:
-            last_log = self._maker_probe_always_last_log_ts.get(asset, 0)
-            if ts_ms - last_log >= 60000:
-                logger.debug(
-                    "[SPOT_PERP][MAKER_PROBE] always_rate_limited asset=%s elapsed_ms=%s limit_ms=%s",
-                    asset,
-                    ts_ms - last_ts,
-                    self._maker_probe_always_rate_limit_ms,
-                )
-                self._maker_probe_always_last_log_ts[asset] = ts_ms
+        if ts_ms - last_ts < self._maker_probe_always_interval_ms:
             return
         self._maker_probe_always_last_ts[asset] = ts_ms
         self._record_maker_probe(
@@ -777,6 +768,16 @@ class SpotPerpPaperEngine:
         perp_bid: float,
         perp_ask: float,
     ) -> None:
+        self._maybe_record_maker_probe_always_raw(asset, spot_bid, spot_ask, perp_bid, perp_ask)
+
+    def _maybe_record_maker_probe_always_raw(
+        self,
+        asset: str,
+        spot_bid: Optional[float],
+        spot_ask: Optional[float],
+        perp_bid: Optional[float],
+        perp_ask: Optional[float],
+    ) -> None:
         if not self._maker_probe_always_enabled:
             return
         if spot_bid is None or spot_ask is None or perp_bid is None or perp_ask is None:
@@ -785,22 +786,22 @@ class SpotPerpPaperEngine:
             return
         ts_ms = now_ms()
         last_ts = self._maker_probe_always_last_ts.get(asset, 0)
-        if ts_ms - last_ts < self._maker_probe_always_rate_limit_ms:
+        if ts_ms - last_ts < self._maker_probe_always_interval_ms:
             return
         self._maker_probe_always_last_ts[asset] = ts_ms
-        spot_px = (spot_bid + spot_ask) / 2.0
-        perp_px = (perp_bid + perp_ask) / 2.0
+        spot_px = (float(spot_bid) + float(spot_ask)) / 2.0
+        perp_px = (float(perp_bid) + float(perp_ask)) / 2.0
         self._record_maker_probe(
             asset=asset,
             direction="NA",
             spot_px=spot_px,
             perp_px=perp_px,
-            spot_bid=spot_bid,
-            spot_ask=spot_ask,
-            perp_bid=perp_bid,
-            perp_ask=perp_ask,
+            spot_bid=float(spot_bid),
+            spot_ask=float(spot_ask),
+            perp_bid=float(perp_bid),
+            perp_ask=float(perp_ask),
         )
-        logger.debug("[SPOT_PERP][MAKER_PROBE] always_record asset=%s ts=%s", asset, ts_ms)
+        logger.info("[SPOT_PERP][MAKER_PROBE] always_record asset=%s ts=%s", asset, ts_ms)
 
     def _log_recent_maker_probes(self, session) -> None:
         rows = (

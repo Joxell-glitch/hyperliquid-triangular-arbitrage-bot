@@ -14,6 +14,18 @@ The project therefore pivoted to **synthetic triangular arbitrage**, combining:
 
 The system is **research-first** and **paper-only**. It is designed to measure realistic edge after **maker/taker fees**, latency, slippage, and market microstructure constraints. The current objective is to build a research-grade paper trading system that continuously scans the entire Hyperliquid universe to detect inefficiencies, quantify fee-adjusted edge, evaluate fill probability, and adapt to market changes without executing live orders.
 
+### PnL Realism & Edge Definition
+- **Fees:** use effective maker/taker fees (config-driven with tier fallback) and record the fee rates used per run.
+- **Net edge:** compute net PnL after fees, not just gross.
+- **Frequency:** track opportunity frequency per asset/path.
+- **Fill probability:** estimate fill probability for maker-maker (queue/latency proxy) and for taker scenarios.
+- **Slippage:** depth-aware slippage modeling; high-frequency micro edges can still be viable if slippage is bounded—focus on total daily net.
+
+### How we decide what to trade
+- Rank candidates by **net edge × expected fill probability × frequency**, penalized by slippage/latency.
+- Select top-N assets/triangles for paper trading.
+- Re-run selection periodically via **Auto-Scan** to adapt to new listings and edge decay.
+
 ## Features
 - Async architecture with `httpx` (REST) and `websockets` (order books).
 - Configurable via YAML (`config/config.yaml`) plus environment variables loaded from `.env`.
@@ -42,23 +54,25 @@ Ensure data quality and traceability across REST/WS feeds.
 Validate correctness of pricing logic before optimization.
 - [DONE] Depth-aware edge estimation for Spot/Perp
 - [TODO] Perp/Perp synthetic triangle validation suite
-- [TODO] Maker and taker fee modeling parity across all paths
+- [TODO] Real-fee parity across Spot/Perp and Perp/Perp (maker and taker)
 
 ### D) Dataset & Offline Analysis
 Build research datasets for microstructure and fill-probability studies.
 - [DONE] Run-level storage of opportunities in SQLite
 - [TODO] Standardized datasets for slippage/latency attribution
+- [TODO] Research metrics: net edge distribution, hit-rate, dt_next_ms/latency buckets, fill proxy metrics
 - [TODO] Offline fill-probability and microstructure labeling
 
 ### E) Hardening & Risk Controls
 Add guardrails appropriate for a future live system without enabling execution.
-- [TODO] Auto-scan universe to detect newly listed assets and shifting edge
-- [TODO] Dynamic asset activation/deactivation based on edge decay
+- [TODO] Universe Auto-Scan (new listings + edge decay + dynamic activation)
+- [DONE] Paper trading phase explicitly before any live execution
+- [BLOCKED] Separate live execution layer as its own service (pending validation/risk controls)
 - [TODO] Explicit separation between research metrics and any live execution layer
 
 ### F) Future Extensions (post-validation)
 Post-research enhancements once the synthetic model is validated.
-- [TODO] Optional real execution layer (separate service)
+- [TODO] Dashboard on Vercel for monitoring Paper now and Live later
 - [BLOCKED] Live trading pending strategy validation, risk controls, and regulatory review
 
 ## Requirements
@@ -160,7 +174,7 @@ python -m pip check
    npm install
    NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 npm run dev
    ```
-   La dashboard chiama sempre il backend FastAPI configurato in `NEXT_PUBLIC_BACKEND_URL` (nessun accesso diretto a file o SQLite).
+   La dashboard chiama sempre il backend FastAPI configurato in `NEXT_PUBLIC_BACKEND_URL` (nessun accesso diretto a file o SQLite) ed è pensata per monitorare prima il paper trading e in futuro il live.
 
 ## Bootstrap (one-liner)
 `rm -rf .venv && python3.8 -m venv .venv && source .venv/bin/activate && python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements-lock.txt && python -m pip check && python -m src.cli.run_spot_perp_paper --assets BTC`

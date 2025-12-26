@@ -8,6 +8,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy import or_
+
 from src.config.loader import load_config
 from src.config.models import FeedHealthSettings, Settings, TradingSettings, ValidationSettings
 from src.core.logging import get_logger
@@ -648,6 +650,50 @@ class SpotPerpPaperEngine:
         dt_next_ms: Optional[float] = None
         return curr, next_snapshot, dt_next_ms
 
+    def _update_open_maker_probe_always(
+        self,
+        session,
+        asset: str,
+        ts_ms: int,
+        spot_bid: float,
+        spot_ask: float,
+        perp_bid: float,
+        perp_ask: float,
+    ) -> None:
+        last_probe = (
+            session.query(MakerProbe)
+            .filter(
+                MakerProbe.asset == asset,
+                MakerProbe.ts.isnot(None),
+                or_(
+                    MakerProbe.dt_next_ms.is_(None),
+                    MakerProbe.dt_next_ms < 0,
+                    MakerProbe.spot_bid_next.is_(None),
+                    MakerProbe.spot_ask_next.is_(None),
+                    MakerProbe.perp_bid_next.is_(None),
+                    MakerProbe.perp_ask_next.is_(None),
+                ),
+            )
+            .order_by(MakerProbe.ts.desc())
+            .first()
+        )
+        if not last_probe:
+            return
+        prev_ts = last_probe.ts or ts_ms
+        dt_next_ms = max(0.0, float(ts_ms - prev_ts))
+        last_probe.spot_bid_next = spot_bid
+        last_probe.spot_ask_next = spot_ask
+        last_probe.perp_bid_next = perp_bid
+        last_probe.perp_ask_next = perp_ask
+        last_probe.dt_next_ms = dt_next_ms
+        session.flush()
+        logger.info(
+            "[SPOT_PERP][MAKER_PROBE] update_next id=%s asset=%s dt_next_ms=%.1f",
+            last_probe.id,
+            asset,
+            dt_next_ms,
+        )
+
     def _record_maker_probe(
         self,
         asset: str,
@@ -658,6 +704,7 @@ class SpotPerpPaperEngine:
         spot_ask: float,
         perp_bid: float,
         perp_ask: float,
+        always_mode: bool = False,
     ) -> None:
         ts_ms = now_ms()
         logger.debug(
@@ -691,36 +738,53 @@ class SpotPerpPaperEngine:
                     self._maker_probe_table_log_emitted[asset] = True
                 return
             with self._maker_probe_session() as session:
-                last_probe = (
-                    session.query(MakerProbe)
-                    .filter(MakerProbe.asset == asset, MakerProbe.dt_next_ms <= -0.5)
-                    .order_by(MakerProbe.ts.desc())
-                    .first()
-                )
-                if last_probe:
-                    age_ms = float(now_ms() - (last_probe.ts or now_ms()))
-                    if age_ms > 5000:
-                        if not self._maker_probe_skip_logged.get(asset):
+                if always_mode:
+                    try:
+                        self._update_open_maker_probe_always(
+                            session=session,
+                            asset=asset,
+                            ts_ms=ts_ms,
+                            spot_bid=spot_bid,
+                            spot_ask=spot_ask,
+                            perp_bid=perp_bid,
+                            perp_ask=perp_ask,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[SPOT_PERP][MAKER_PROBE] update_next_failed asset=%s",
+                            asset,
+                        )
+                else:
+                    last_probe = (
+                        session.query(MakerProbe)
+                        .filter(MakerProbe.asset == asset, MakerProbe.dt_next_ms <= -0.5)
+                        .order_by(MakerProbe.ts.desc())
+                        .first()
+                    )
+                    if last_probe:
+                        age_ms = float(now_ms() - (last_probe.ts or now_ms()))
+                        if age_ms > 5000:
+                            if not self._maker_probe_skip_logged.get(asset):
+                                logger.info(
+                                    "[SPOT_PERP][MAKER_PROBE] skip_update_next_old id=%s age_ms=%.1f",
+                                    last_probe.id,
+                                    age_ms,
+                                )
+                                self._maker_probe_skip_logged[asset] = True
+                        else:
+                            last_probe.spot_bid_next = spot_bid
+                            last_probe.spot_ask_next = spot_ask
+                            last_probe.perp_bid_next = perp_bid
+                            last_probe.perp_ask_next = perp_ask
+                            last_probe.dt_next_ms = max(0.0, age_ms)
+                            session.flush()
                             logger.info(
-                                "[SPOT_PERP][MAKER_PROBE] skip_update_next_old id=%s age_ms=%.1f",
+                                "[SPOT_PERP][MAKER_PROBE] update_next id=%s ts=%s dt_next_ms=%.2f age_ms=%.1f",
                                 last_probe.id,
+                                last_probe.ts,
+                                last_probe.dt_next_ms,
                                 age_ms,
                             )
-                            self._maker_probe_skip_logged[asset] = True
-                    else:
-                        last_probe.spot_bid_next = spot_bid
-                        last_probe.spot_ask_next = spot_ask
-                        last_probe.perp_bid_next = perp_bid
-                        last_probe.perp_ask_next = perp_ask
-                        last_probe.dt_next_ms = max(0.0, age_ms)
-                        session.flush()
-                        logger.info(
-                            "[SPOT_PERP][MAKER_PROBE] update_next id=%s ts=%s dt_next_ms=%.2f age_ms=%.1f",
-                            last_probe.id,
-                            last_probe.ts,
-                            last_probe.dt_next_ms,
-                            age_ms,
-                        )
                 new_probe = MakerProbe(
                     ts=ts_ms,
                     asset=asset,
@@ -781,6 +845,7 @@ class SpotPerpPaperEngine:
             spot_ask=edge_snapshot.spot_ask,
             perp_bid=edge_snapshot.perp_bid,
             perp_ask=edge_snapshot.perp_ask,
+            always_mode=True,
         )
 
     def _maybe_record_maker_probe_always_quotes(
@@ -833,6 +898,7 @@ class SpotPerpPaperEngine:
             spot_ask=float(spot_ask),
             perp_bid=float(perp_bid),
             perp_ask=float(perp_ask),
+            always_mode=True,
         )
         logger.info("[SPOT_PERP][MAKER_PROBE] always_record asset=%s ts=%s", asset, ts_ms)
 

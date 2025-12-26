@@ -298,7 +298,9 @@ class SpotPerpPaperEngine:
             "true",
             "yes",
         )
-        self._maker_probe_always_rate_limit_ms = 2000
+        self._maker_probe_always_rate_limit_ms = int(
+            os.getenv("SPOT_PERP_MAKER_PROBE_ALWAYS_INTERVAL_MS", "2000")
+        )
         self._maker_probe_always_last_ts: Dict[str, int] = {asset: 0 for asset in self.assets}
         self._maker_probe_always_last_log_ts: Dict[str, int] = {asset: 0 for asset in self.assets}
         logger.debug(
@@ -766,6 +768,39 @@ class SpotPerpPaperEngine:
             perp_bid=edge_snapshot.perp_bid,
             perp_ask=edge_snapshot.perp_ask,
         )
+
+    def _maybe_record_maker_probe_always_quotes(
+        self,
+        asset: str,
+        spot_bid: float,
+        spot_ask: float,
+        perp_bid: float,
+        perp_ask: float,
+    ) -> None:
+        if not self._maker_probe_always_enabled:
+            return
+        if spot_bid is None or spot_ask is None or perp_bid is None or perp_ask is None:
+            return
+        if spot_bid <= 0 or spot_ask <= 0 or perp_bid <= 0 or perp_ask <= 0:
+            return
+        ts_ms = now_ms()
+        last_ts = self._maker_probe_always_last_ts.get(asset, 0)
+        if ts_ms - last_ts < self._maker_probe_always_rate_limit_ms:
+            return
+        self._maker_probe_always_last_ts[asset] = ts_ms
+        spot_px = (spot_bid + spot_ask) / 2.0
+        perp_px = (perp_bid + perp_ask) / 2.0
+        self._record_maker_probe(
+            asset=asset,
+            direction="NA",
+            spot_px=spot_px,
+            perp_px=perp_px,
+            spot_bid=spot_bid,
+            spot_ask=spot_ask,
+            perp_bid=perp_bid,
+            perp_ask=perp_ask,
+        )
+        logger.debug("[SPOT_PERP][MAKER_PROBE] always_record asset=%s ts=%s", asset, ts_ms)
 
     def _log_recent_maker_probes(self, session) -> None:
         rows = (
@@ -1606,8 +1641,12 @@ class SpotPerpPaperEngine:
             self._log_strategy_skip(asset, reason, snapshot)
             return
 
+        spot_bid, spot_ask = self._effective_spot_prices(state)
+        perp_bid = state.perp.best_bid
+        perp_ask = state.perp.best_ask
+        self._maybe_record_maker_probe_always_quotes(asset, spot_bid, spot_ask, perp_bid, perp_ask)
+
         edge_snapshot = self._build_edge_snapshot(asset, state)
-        self._maybe_record_maker_probe_always(edge_snapshot)
         spot_label = "spot_ask" if edge_snapshot.direction == "spot_long" else "spot_bid"
         perp_label = "perp_bid" if edge_snapshot.direction == "spot_long" else "perp_ask"
         fee_spot_source = "config" if self.spot_fee_mode == "maker" else "fallback"

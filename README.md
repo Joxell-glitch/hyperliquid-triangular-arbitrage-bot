@@ -14,6 +14,13 @@ The project therefore pivoted to **synthetic triangular arbitrage**, combining:
 
 The system is **research-first** and **paper-only**. It is designed to measure realistic edge after **maker/taker fees**, latency, slippage, and market microstructure constraints. The current objective is to build a research-grade paper trading system that continuously scans the entire Hyperliquid universe to detect inefficiencies, quantify fee-adjusted edge, evaluate fill probability, and adapt to market changes without executing live orders.
 
+## Session Snapshot (Architecture & Direction)
+- Spot/Spot arbitrage is structurally irrelevant on Hyperliquid and is excluded from scope.
+- Synthetic arbitrage targets Spot/Perp as the primary focus, with Perp/Perp as a secondary comparative baseline.
+- Current architecture lacks a synthetic triangle execution model and requires per-leg market typing for cross-market triangles.
+- Triangular arbitrage is a research baseline, not the only edge class.
+- The architecture must remain extensible to non-triangular edges (lead–lag, basis, liquidation-driven).
+
 ### PnL Realism & Edge Definition
 - **Fees:** use effective maker/taker fees (config-driven with tier fallback) and record the fee rates used per run.
 - **Net edge:** compute net PnL after fees, not just gross.
@@ -40,40 +47,43 @@ The system is **research-first** and **paper-only**. It is designed to measure r
 
 ### A) Runtime Stability & Baseline
 Establish a stable, long-running paper-trading loop for synthetic triangles.
-- [DONE] Spot/Perp paper trading loop and persistence
+- [TODO] Spot/Perp paper trading loop and persistence (incomplete baseline)
 - [DONE] Per-run IDs, SQLite logging, and heartbeats
-- [TODO] Perp/Perp baseline paper loop parity with Spot/Perp
+- [TODO] Synthetic Triangle model (Spot/Perp)
+- [TODO] Perp/Perp synthetic baseline (secondary/comparative)
+- [DONE] Spot/Spot excluded as structurally irrelevant on Hyperliquid
 
 ### B) Feed Integrity & Observability
 Ensure data quality and traceability across REST/WS feeds.
 - [DONE] WebSocket reconnects with exponential backoff
 - [DONE] API latency measurement tooling
-- [TODO] Unified feed health dashboard for spot/perp/perp streams
+- [BLOCKED] Unified feed health dashboard for cross-market streams (blocked by A)
 
 ### C) Strategy Logic Validation (NO PnL optimization)
 Validate correctness of pricing logic before optimization.
-- [DONE] Depth-aware edge estimation for Spot/Perp
-- [TODO] Perp/Perp synthetic triangle validation suite
-- [TODO] Real-fee parity across Spot/Perp and Perp/Perp (maker and taker)
+- [DONE] Depth-aware edge estimation for synthetic Spot/Perp
+- [BLOCKED] Synthetic triangle validation suite (Spot/Perp and Perp/Perp) (blocked by A)
+- [BLOCKED] Real-fee parity across synthetic models (maker and taker) (blocked by A)
 
 ### D) Dataset & Offline Analysis
 Build research datasets for microstructure and fill-probability studies.
 - [DONE] Run-level storage of opportunities in SQLite
-- [TODO] Standardized datasets for slippage/latency attribution
-- [TODO] Research metrics: net edge distribution, hit-rate, dt_next_ms/latency buckets, fill proxy metrics
-- [TODO] Offline fill-probability and microstructure labeling
+- [BLOCKED] Synthetic-edge datasets for slippage/latency attribution (blocked by synthetic execution model)
+- [BLOCKED] Research metrics for synthetic edges: net edge distribution, hit-rate, dt_next_ms/latency buckets, fill proxy metrics (blocked by synthetic execution model)
+- [BLOCKED] Offline fill-probability and microstructure labeling for synthetic edges (blocked by synthetic execution model)
 
 ### E) Hardening & Risk Controls
 Add guardrails appropriate for a future live system without enabling execution.
-- [TODO] Universe Auto-Scan (new listings + edge decay + dynamic activation)
+- [BLOCKED] Universe Auto-Scan (new listings + edge decay + dynamic activation) (dependent on validated synthetic models)
 - [DONE] Paper trading phase explicitly before any live execution
 - [BLOCKED] Separate live execution layer as its own service (pending validation/risk controls)
-- [TODO] Explicit separation between research metrics and any live execution layer
+- [BLOCKED] Explicit separation between research metrics and any live execution layer (dependent on validated synthetic models)
 
 ### F) Future Extensions (post-validation)
 Post-research enhancements once the synthetic model is validated.
-- [TODO] Dashboard on Vercel for monitoring Paper now and Live later
+- [TODO] Dashboard on Vercel for monitoring Paper now and Live later (post-validation)
 - [BLOCKED] Live trading pending strategy validation, risk controls, and regulatory review
+- [TODO] Extend to non-triangular edge classes (lead–lag, basis, liquidation-driven)
 
 ## Requirements
 - Python 3.8

@@ -25,3 +25,7 @@ import
 
 # Local config backups
 config/*.bak*
+
+# Local-only artifacts
+/METTI_QUI_IL_PATH_DEL_DB
+/hyperliquid-bot-src.tgz

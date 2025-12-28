@@ -1551,18 +1551,22 @@ class HyperliquidClient:
     async def _cancel_books_watchdog(self, asset: Optional[str] = None) -> None:
         if asset:
             task = self._books_watchdog_tasks.get(asset)
-            if task and not task.done():
+            if task is not None and not task.done():
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await task
+                except asyncio.CancelledError:
+                    pass
             self._books_watchdog_tasks[asset] = None  # type: ignore[assignment]
         else:
             for task_asset, task in list(self._books_watchdog_tasks.items()):
-                if task and not task.done():
+                if task is not None and not task.done():
                     task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            self._books_watchdog_tasks[task_asset] = None  # type: ignore[assignment]
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                self._books_watchdog_tasks[task_asset] = None  # type: ignore[assignment]
 
     def _mark_l2book_seen(self, key: Optional[str], *, reason: str, asset_label: Optional[str] = None) -> None:
         if not key:

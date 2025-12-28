@@ -69,6 +69,8 @@ Ensure data quality and traceability across REST/WS feeds.
 ### C) Strategy Logic Validation (NO PnL optimization)
 Validate correctness of pricing logic before optimization.
 - [DONE] Depth-aware edge estimation for synthetic Spot/Perp
+- [DONE] Validazione statistica edge Spot–Perp (percentile-based)
+- [DONE] Execution-like stress test con haircut deterministico
 - [BLOCKED] Synthetic triangle validation suite (Spot/Perp and Perp/Perp) (blocked by A)
 - [BLOCKED] Real-fee parity across synthetic models (maker=0.0 per HL policy; taker via config/tier fallback) (blocked by A)
 
@@ -87,6 +89,9 @@ Add guardrails appropriate for a future live system without enabling execution.
 - [DONE] Paper trading phase explicitly before any live execution
 - [DONE] Maker-mode fee guardrail enforces maker_fee_* = 0.0 in paper mode
 - [DONE] Safe-run workflow temporarily sets maker fees to 0.0 with automatic restore on exit
+- [BLOCKED] Live execution (pending strategy validation and risk controls)
+- [TODO] Kill-switch automatici (risk guardrails pre-live)
+- [TODO] Position sizing dinamico (risk-aware sizing rules)
 - [BLOCKED] Separate live execution layer as its own service (pending validation/risk controls)
 - [BLOCKED] Explicit separation between research metrics and any live execution layer (dependent on validated synthetic models)
 
@@ -327,3 +332,10 @@ python -m src.cli.run_spot_perp_paper --config config/config.yaml --assets BTC,E
 
 ## Disclaimer
 This code is for research and paper trading only. Use at your own risk.
+
+### Session Snapshot (End of Session)
+- Validazione edge Spot–Perp su Hyperliquid tramite paper engine completata.
+- Stress test execution-like introdotto con haircut deterministico.
+- Risultato chiave: Haircut 0.50% sostenibile (PnL/DD ~4 su BTC ed ETH); Haircut 0.80% non sostenibile (PnL negativo, DD elevato).
+- Decisione: 0.50% adottato come baseline conservativa per paper-realistica.
+- Confermato approccio percentile-driven (p90/p99 > winrate).

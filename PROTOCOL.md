@@ -15,9 +15,15 @@ Questo protocollo NON è opzionale.
 
 ## Modalità operativa
 - Operare in **micro-step**
-- Massimo **1–2 azioni concrete**
-- STOP obbligatorio dopo ogni step
-- Attendere conferma umana prima di procedere
+- Massimo **1–2 azioni concrete** (workpack piccolo)
+- STOP obbligatorio dopo ogni step SOLO per:
+  - cambi schema DB / migrazioni
+  - cambi a PROTOCOL/ROADMAP/DECISIONS/README
+  - modifiche che toccano logica trading/execution
+  - operazioni distruttive (delete massivo, refactor ampio)
+- Per task “meccanici” dentro un prompt chirurgico (es. creare file/moduli definiti dal prompt):
+  - procedere senza chiedere conferma ad ogni file
+  - fermarsi solo a fine step con summary + test eseguiti
 
 ## Stile decisionale
 - Privilegiare soluzioni **deterministiche**

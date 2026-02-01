@@ -1,96 +1,121 @@
-# Hyperliquid Triangular Arbitrage Bot
+# Hyperliquid Edge Research Bot
 
-The system is **research-first** and **paper-only**.
-It is designed to measure **real, survivable edge** under realistic market microstructure constraints.
+Il sistema è **orientato alla ricerca** e **solo su carta**.
+È progettato per misurare un **vantaggio reale e sostenibile** sotto vincoli realistici di microstruttura del mercato.
 
-## Net-Profit Focus (Definition)
+⚠️ **Nota di contesto (aggiornamento)**  
+Il progetto nasce come “triangolare”, ma l’evoluzione attuale è focalizzata sulla **ricerca edge e sulla dislocazione Spot ↔ Perp** su Hyperliquid.  
+Le componenti triangolari non sono rimosse, ma **non rappresentano il core operativo attuale**.
 
-- **Edge:** raw price discrepancy before costs
-- **Fees:** maker/taker fees per leg (config + tier fallback)
-- **Fill probability:** expected completion rate for each leg
-- **Slippage:** depth- and latency-adjusted execution impact
-- **Frequency:** opportunities per day per asset/path
+## Focus sul Profitto Netto (Definizione)
+
+- **Vantaggio:** discrepanza di prezzo grezza prima dei costi
+- **Commissioni:** commissioni maker/taker per ogni gamba (config + fallback tier)
+- **Probabilità di esecuzione:** tasso di completamento atteso per ogni gamba
+- **Slippage:** impatto di esecuzione aggiustato per profondità e latenza
+- **Frequenza:** opportunità al giorno per mercato
 - **KPI:**  
-  **daily net** = (edge − fees − slippage) × fill probability × frequency
+  **netto giornaliero** = (vantaggio − commissioni − slippage) × probabilità di esecuzione × frequenza
 
-## How Trading Candidates Are Selected
+➡️ Questo principio resta valido ed è ora applicato **a livello di singolo mercato/variante**, non di “asset base”.
 
-- Rank assets by **net edge × expected fill probability × frequency**
-- Penalize for slippage and latency
-- Select top-N candidates for paper evaluation
-- Periodically re-run selection via **Auto-Scan** to adapt to new listings and edge decay
+## Come Vengono Selezionati i Candidati
 
-## Features
+- Classificazione dei **mercati** (non asset) per:
+  - edge potenziale
+  - probabilità di esecuzione
+  - frequenza
+- Penalizzazione per spread, slippage e latenza
+- Selezione dei candidati migliori per valutazione su carta
+- Rivalutazione periodica tramite **Auto-Scan** per intercettare:
+  - decadimento dell’edge
+  - nuove opportunità emergenti
 
-- Async architecture using `httpx` (REST) and `websockets` (order books)
-- YAML-based configuration (`config/config.yaml`) + environment variables
-- Hyperliquid mainnet and testnet support
-- Paper portfolio tracking with per-run IDs
-- SQLite persistence (default)
-- Synthetic Spot/Perp edge evaluation (paper-only)
-- Typer-based CLI
-- GitHub Actions CI running pytest
+## Caratteristiche
 
-## Roadmap & Project Status
+- Architettura asincrona utilizzando `httpx` (REST) e `websockets` (Order Book)
+- Configurazione basata su YAML (`config/config.yaml`) + variabili d'ambiente
+- Supporto per Hyperliquid mainnet e testnet
+- Persistenza SQLite (predefinita)
+- CLI basata su Typer
+- CI GitHub Actions che esegue pytest
+- Valutazione Spot ↔ Perp (paper only)
 
-### Current Roadmap Status
+## Data Layer (AGGIUNTO – stato attuale del progetto)
 
-- **A) Runtime Stability & Baseline** — COMPLETED
-- **B) Feed Integrity & Observability** — COMPLETED (Deterministic Decision Trace)
-- **C) Strategy Logic Validation** — NOT STARTED (Autoscan not executed)
-- **D) Dataset & Offline Analysis** — PARTIAL
-- **E) Hardening & Risk Controls** — BLOCKED (depends on C)
-- **F) Future Extensions** — BLOCKED
+È in fase di implementazione un **Universe Raw Collector**, che diventa la **fonte dati canonica** del progetto.
 
-### Handoff Snapshot (Current State)
+Caratteristiche:
+- Unità di scansione: **mercato / variante** (es. BTC/USDC spot, BTC-USDE perp)
+- Copertura: **tutti i mercati Hyperliquid**, inclusi nuovi listaggi
+- Rolling window: **ultime 24 ore** (cleanup FIFO)
+- Dati salvati:
+  - L1: bid / ask / mid
+  - Contesto: volume 24h, funding, open interest (se disponibili)
+- Sampling adattivo:
+  - mercati prioritari → alta frequenza
+  - resto dell’universo → bassa frequenza
+  - promotion / demotion automatiche
 
-- Source of truth: **VM**
-- `main` branch aligned with VM
-- All pytest tests passing
-- Decision Trace normalized (**READY / SKIP / HALT**)
-- Kill-switch logic isolated from tests
-- Autoscan **NOT** executed
-- No PnL optimization performed
+Questo layer è progettato per:
+- analisi offline
+- validazione strategie
+- rotazione dinamica dei mercati monitorati
+- evitare di appesantire inutilmente il database
 
-## Continuity & Execution Contract
+## Roadmap e Stato del Progetto
 
-This README is the **canonical high-level context document**.
+### Stato Attuale della Roadmap
 
-Cursor must:
-- Read this file entirely before acting
-- Treat it as a **binding contract**
-- Continue work without external assumptions
+- **A) Stabilità Runtime e Baseline** — COMPLETATO
+- **B) Integrità Feed e Osservabilità** — COMPLETATO
+- **C) Validazione Logica Strategia** — PAUSA
+- **D) Dataset e Analisi Offline** — **FASE ATTIVA**
+- **E) Rafforzamento e Controlli di Rischio** — BLOCCATO
+- **F) Estensioni Future** — BLOCCATO
 
-Operational continuity is enforced through:
-- `README.md` — high-level project state
-- `PROTOCOL.md` — execution rules and constraints
-- `ROADMAP.md` — active phase and micro-step
-- `DECISIONS.md` — decisions taken and explicitly avoided
-- `SESSION_*.json` — session-level technical summaries
+### Snapshot di Handoff (Stato Attuale)
 
-## Operational Guidelines (Cursor)
+- Fonte di verità: **VM**
+- Branch `main` allineato con VM
+- Test pytest passano
+- Traccia Decisionale normalizzata (**READY / SKIP / HALT**)
+- Nessuna ottimizzazione PnL live
+- Focus attuale: **costruzione dataset robusto e leggero**
 
-- Cursor operates directly on the **VM**
-- Cursor has full read/write access to the codebase
-- Cursor executes changes autonomously
+## Continuità e Contratto di Esecuzione
 
-Principles:
-- Prefer **deterministic solutions**
-- Avoid exploratory or speculative changes unless explicitly requested
-- If information is insufficient, **stop and ask**
-- Detect and report VM/GitHub divergence; do not silently auto-fix
+Questo README è il **documento canonico di contesto high-level**.
 
-Execution model:
-- Cursor = executor and analyst
-- Human = decision authority
-- GitHub = persistence layer (may lag VM)
+Cursor deve:
+- Leggere questo file completamente prima di agire
+- Trattarlo come un **contratto vincolante**
+- Continuare il lavoro senza assunzioni esterne
 
-## Requirements
+La continuità operativa è garantita da:
+- `README.md` — stato e visione del progetto
+- `PROTOCOL.md` — regole di esecuzione e vincoli
+- `ROADMAP.md` — fase attiva e micro-step
+- `DECISIONS.md` — decisioni prese / evitate
+- `SESSION_*.json` — log tecnici per sessione
+
+Ruoli:
+- **ChatGPT** → brainstorming, validazione, definizione prompt
+- **Cursor** → esecutore sul filesystem VM
+- **Umano** → autorità decisionale
+- **GitHub** → persistenza (può essere in ritardo rispetto alla VM)
+
+Principi:
+- Preferire **soluzioni deterministiche**
+- Evitare modifiche esplorative o speculative a meno che non siano esplicitamente richieste
+- Se le informazioni sono insufficienti, **fermarsi e chiedere**
+
+## Requisiti
 
 - Python 3.8
-- Network access to Hyperliquid APIs (offline tests via mocks)
+- Accesso di rete alle API Hyperliquid (test offline tramite mock)
 
-## Environment & Paths
+## Ambiente e Percorsi
 
-- GitHub repository: https://github.com/Joxell-glitch/hyperliquid-triangular-arbitrage-bot
-- VM path: `/home/ubuntu/hyperliquid-triangular-arbitrage-bot`
+- Repository GitHub: https://github.com/Joxell-glitch/hyperliquid-triangular-arbitrage-bot
+- Percorso VM: `/home/ubuntu/hyperliquid-triangular-arbitrage-bot`

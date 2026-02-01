@@ -42,3 +42,17 @@ theoretical_*
 realized_*
 run_id,*
 route,*
+
+# --- sicurezza / segreti ---
+.env
+
+# --- python venv / cache ---
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# --- runtime (se vuoi tenerli solo su VM) ---
+logs/
+data/

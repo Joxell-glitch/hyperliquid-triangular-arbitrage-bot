@@ -1,79 +1,79 @@
-network: mainnet
+network: <INSERT_VALUE>
 api:
-  rest_base: "https://api.hyperliquid.xyz"
-  info_path: "/info"
-  websocket_url: "wss://api.hyperliquid.xyz/ws"
-  testnet_rest_base: "https://api.hyperliquid-testnet.xyz"
-  testnet_websocket_url: "wss://api.hyperliquid-testnet.xyz/ws"
+  rest_base: <INSERT_VALUE>
+  info_path: <INSERT_VALUE>
+  websocket_url: <INSERT_VALUE>
+  testnet_rest_base: <INSERT_VALUE>
+  testnet_websocket_url: <INSERT_VALUE>
 
 trading:
-  quote_asset: "USDC"
-  initial_quote_balance: 10000.0
-  min_position_size: 50.0
-  max_position_size: 500.0
-  min_edge_threshold: 0.0003  # Recommend ~0.0002-0.0004 (20-40 bps) for BTC paper testing
-  safety_slippage_buffer: 0.00005  # 0.5 bps default; small additive buffer on top of observed spreads
-  fee_mode: maker
-  spot_fee_mode: maker
-  perp_fee_mode: maker
-  maker_fee_spot: 0.0
-  maker_fee_perp: 0.0
-  taker_fee_spot: 0.001
-  taker_fee_perp: 0.0005
-  max_concurrent_triangles: 5
-  top_n_opportunities: 20
-  max_assets_per_ws: 50
-  whitelist: []
-  blacklist: []
-  spot_pair_overrides: {}
-  min_average_volume: 0
-  max_spread_pct: 0.01
+  quote_asset: <INSERT_VALUE>
+  initial_quote_balance: <INSERT_VALUE>
+  min_position_size: <INSERT_VALUE>
+  max_position_size: <INSERT_VALUE>
+  min_edge_threshold: <INSERT_VALUE>
+  safety_slippage_buffer: <INSERT_VALUE>
+  fee_mode: <INSERT_VALUE>
+  spot_fee_mode: <INSERT_VALUE>
+  perp_fee_mode: <INSERT_VALUE>
+  maker_fee_spot: <INSERT_VALUE>
+  maker_fee_perp: <INSERT_VALUE>
+  taker_fee_spot: <INSERT_VALUE>
+  taker_fee_perp: <INSERT_VALUE>
+  max_concurrent_triangles: <INSERT_VALUE>
+  top_n_opportunities: <INSERT_VALUE>
+  max_assets_per_ws: <INSERT_VALUE>
+  whitelist: <INSERT_VALUE>
+  blacklist: <INSERT_VALUE>
+  spot_pair_overrides: <INSERT_VALUE>
+  min_average_volume: <INSERT_VALUE>
+  max_spread_pct: <INSERT_VALUE>
 
 database:
-  backend: sqlite
-  sqlite_path: "data/arb_bot.sqlite"
+  backend: <INSERT_VALUE>
+  sqlite_path: <INSERT_VALUE>
   postgres:
-    host: "localhost"
-    port: 5432
-    user: "user"
-    password: "password"
-    database: "hyperliquid"
+    host: <INSERT_VALUE>
+    port: <INSERT_VALUE>
+    user: <INSERT_VALUE>
+    password: <INSERT_VALUE>
+    database: <INSERT_VALUE>
 
 logging:
-  level: INFO
-  log_file: "data/bot.log"
-  console: true
+  level: <INSERT_VALUE>
+  log_file: <INSERT_VALUE>
+  console: <INSERT_VALUE>
 
 feed_health:
-  log_interval_sec: 1
-  stale_ms: 1500
-  out_of_sync_ms: 1000
-  dedup_ttl_sec: 2
+  log_interval_sec: <INSERT_VALUE>
+  stale_ms: <INSERT_VALUE>
+  out_of_sync_ms: <INSERT_VALUE>
+  dedup_ttl_sec: <INSERT_VALUE>
 
 observability:
-  log_top_n_each_sec: 60
-  top_n: 10
-  min_abs_profit_to_log: 0.0
+  log_top_n_each_sec: <INSERT_VALUE>
+  top_n: <INSERT_VALUE>
+  min_abs_profit_to_log: <INSERT_VALUE>
 
 validation:
-  enabled: true
-  sample_interval_ms: 250
-  stats_log_interval_sec: 5
-  sqlite_flush_every_n: 50
+  enabled: <INSERT_VALUE>
+  sample_interval_ms: <INSERT_VALUE>
+  stats_log_interval_sec: <INSERT_VALUE>
+  sqlite_flush_every_n: <INSERT_VALUE>
 
 strategy:
-  would_trade: false
-  trace_every_seconds: 10
+  would_trade: <INSERT_VALUE>
+  trace_every_seconds: <INSERT_VALUE>
 
 scanner:
-  interval_seconds: 10
-  window_minutes: 30
-  top_n: 10
-  min_cycles_confirm: 3
-  removal_cooldown_minutes: 10
-  refresh_universe_minutes: 15
+  interval_seconds: <INSERT_VALUE>
+  window_minutes: <INSERT_VALUE>
+  top_n: <INSERT_VALUE>
+  min_cycles_confirm: <INSERT_VALUE>
+  removal_cooldown_minutes: <INSERT_VALUE>
+  refresh_universe_minutes: <INSERT_VALUE>
   weights:
-    count_hits: 1.0
-    avg_edge_bps: 1.0
-    p90_edge_bps: 1.0
-    instability_penalty: 1.0
+    count_hits: <INSERT_VALUE>
+    avg_edge_bps: <INSERT_VALUE>
+    p90_edge_bps: <INSERT_VALUE>
+    instability_penalty: <INSERT_VALUE>

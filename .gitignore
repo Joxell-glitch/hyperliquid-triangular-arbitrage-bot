@@ -56,3 +56,4 @@ __pycache__/
 # --- runtime (se vuoi tenerli solo su VM) ---
 logs/
 data/
+2_PROMPT_DEFINITIVO_PER_CURSOR_EMOJI.md

@@ -20,6 +20,8 @@ from src.arb.triangular_scanner import TriangularScanner
 from src.arb.paper_trader import PaperTrader
 from src.arb.profit_persistence import ProfitRecorder
 from src.utils.session_scope import session_scope
+from src.collector.universe_raw_collector import UniverseRawCollector
+# Lazy import: export_universe_snapshot imported inside command to avoid YAML recursion
 
 app = typer.Typer(add_completion=False)
 logger = get_logger(__name__)
@@ -222,6 +224,81 @@ def analyze_run(run_id: str = typer.Option(..., help="Run ID"), config_path: str
     setup_logging(settings.logging)
     result = generate_report(run_id, output_dir)
     typer.echo(f"Report written to {result['report_path']}, recommendations to {result['recommendations_path']}")
+
+
+@app.command()
+def run_universe_collector(
+    cleanup_sec: float = typer.Option(300.0, help="Cleanup interval in seconds"),
+    duration_sec: Optional[float] = typer.Option(None, help="Duration limit in seconds (optional)"),
+    ranking_refresh_sec: Optional[float] = typer.Option(None, help="Ranking refresh interval (not implemented in workpack1)"),
+    config_path: str = typer.Option("config/config.yaml", help="Path to config"),
+):
+    """Run the universe raw collector."""
+    settings = load_config(config_path)
+    setup_logging(settings.logging)
+    init_db(settings)
+
+    # ranking_refresh_sec is now implemented in workpack2
+
+    async def _run():
+        client = HyperliquidClient(settings.api, settings.network)
+        collector = UniverseRawCollector(settings, client)
+        try:
+            await collector.run(
+                cleanup_sec=cleanup_sec,
+                duration_sec=duration_sec,
+                ranking_refresh_sec=ranking_refresh_sec,
+            )
+        finally:
+            await client.close()
+
+    asyncio.run(_run())
+
+
+@app.command()
+def export_universe_snapshot(
+    db_path: str = typer.Option("data/arb_bot.sqlite", help="Path to database"),
+    table: str = typer.Option("market_samples", help="Table name"),
+    min_window_hours: float = typer.Option(24.0, help="Minimum window hours required"),
+    out_dir: str = typer.Option("exports/universe_snapshots", help="Output directory"),
+    format: str = typer.Option("csv", help="Export format (csv only)"),
+    top_n: int = typer.Option(400, help="Top N markets for levels export"),
+    force: bool = typer.Option(False, help="Force export even if window < min_window_hours"),
+    now_ms: Optional[int] = typer.Option(None, help="Override current time (ms) for testing"),
+):
+    """Export 24h snapshot of universe data."""
+    # Lazy import to avoid loading YAML at module import time
+    from src.collector.universe_export import export_universe_snapshot
+    
+    result = export_universe_snapshot(
+        db_path=db_path,
+        table=table,
+        min_window_hours=min_window_hours,
+        out_dir=out_dir,
+        format=format,
+        top_n=top_n,
+        force=force,
+        now_ms=now_ms,
+    )
+
+    if result["status"] == "skipped":
+        if result.get("reason") == "no_data":
+            typer.echo("No data in table, export skipped")
+        elif result.get("reason") == "window_too_small":
+            typer.echo(
+                f"NOT READY (window={result.get('window_hours', 0):.2f}h < {result.get('min_window_hours', 24):.2f}h), export skipped"
+            )
+        return
+
+    if result["status"] == "error":
+        typer.echo(f"Export failed: {result.get('error', 'unknown error')}")
+        raise typer.Exit(1)
+
+    typer.echo(
+        f"Export completed: {result.get('rows_exported_raw', 0)} raw rows, "
+        f"{result.get('rows_exported_top', 0)} top levels rows"
+    )
+    typer.echo(f"Output directory: {result.get('out_dir', out_dir)}")
 
 
 if __name__ == "__main__":

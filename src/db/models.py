@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, JSON
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, JSON, Index
 from sqlalchemy.orm import declarative_base
 
 
@@ -169,3 +169,33 @@ class MakerProbe(Base):
     perp_bid_next = Column(Float, nullable=True)
     perp_ask_next = Column(Float, nullable=True)
     dt_next_ms = Column(Float, nullable=True)
+
+
+class MarketSample(Base):
+    __tablename__ = "market_samples"
+    id = Column(Integer, primary_key=True)
+    ts_ms = Column(Integer, index=True)
+    base = Column(String)
+    quote = Column(String)
+    market_type = Column(String)  # "SPOT" | "PERP"
+    variant = Column(String)  # es. "USDC", "USDE", etc.
+    symbol_raw = Column(String, index=True)
+    # L1
+    bid = Column(Float, nullable=True)
+    ask = Column(Float, nullable=True)
+    mid = Column(Float, nullable=True)
+    spread_bps = Column(Float, nullable=True)
+    # CTX
+    mark_price = Column(Float, nullable=True)  # PERP
+    funding_rate = Column(Float, nullable=True)  # PERP
+    open_interest_usd = Column(Float, nullable=True)  # PERP
+    volume_24h_usd = Column(Float, nullable=True)  # SPOT o PERP
+    # META (placeholder per workpack2)
+    level = Column(String, nullable=True)  # per ora sempre "B"
+    score = Column(Float, nullable=True)  # per ora null
+    stale_flag = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("idx_ts_ms", "ts_ms"),
+        Index("idx_symbol_raw", "symbol_raw"),
+    )

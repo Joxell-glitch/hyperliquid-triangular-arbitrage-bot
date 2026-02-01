@@ -1,0 +1,26 @@
+{
+  "timestamp_export": 1769972605.509,
+  "db_path": "data/arb_bot.sqlite",
+  "table": "market_samples",
+  "min_ts_ms": 1769954989721,
+  "max_ts_ms": 1769972582215,
+  "window_hours": 4.886803888888889,
+  "rows_exported_raw": 281967,
+  "rows_distinct_markets": 488,
+  "null_rates": {
+    "volume_24h_usd": 1.0,
+    "open_interest_usd": 1.0,
+    "funding_rate": 1.0,
+    "bid": 0.1891497941248444,
+    "ask": 0.1891497941248444,
+    "mid": 0.1891497941248444,
+    "spread_bps": 0.1891497941248444
+  },
+  "markets_by_level": {
+    "B": 106,
+    "A": 100,
+    "C": 100,
+    "D": 182
+  },
+  "force": true
+}

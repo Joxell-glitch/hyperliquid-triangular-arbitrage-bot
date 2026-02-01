@@ -1,0 +1,61 @@
+{
+  "session_id": "20260201_144236",
+  "date": "2026-02-01",
+  "phase": "D (dataset & offline analysis)",
+  "micro_step": "D.0 - Fix rate limiting 429 Too Many Requests durante bootstrap",
+  "actions_performed": [
+    "Individuato problema: 488 chiamate POST /info in parallelo durante bootstrap causavano 429",
+    "Aggiunto Semaphore (max_concurrent_snapshots=10) nel UniverseRawCollector per limitare concorrenza",
+    "Implementato retry con exponential backoff (max 3 tentativi) su status_code=429 in fetch_orderbook_snapshot",
+    "Testato con duration 10s: nessun errore 429, tutte le chiamate con status_code=200"
+  ],
+  "data_analyzed": [
+    "Test eseguito: 488 mercati, tutte le chiamate snapshot limitate a 10 concorrenti",
+    "Nessun errore 429 rilevato nel log (solo 2 righe con '429' che erano timestamp, non errori)",
+    "Tutte le chiamate hanno status_code=200 OK"
+  ],
+  "results": {
+    "files_modified": [
+      "src/collector/universe_raw_collector.py (aggiunto Semaphore per limitare concorrenza)",
+      "src/hyperliquid_client/client.py (aggiunto retry con exponential backoff su 429)"
+    ],
+    "test_results": {
+      "duration_test": "10s",
+      "markets_total": 488,
+      "max_concurrent_snapshots": 10,
+      "errors_429": 0,
+      "retry_attempts": 0,
+      "all_requests_status": "200 OK"
+    },
+    "implementation_details": {
+      "semaphore": {
+        "location": "UniverseRawCollector.__init__",
+        "default_value": 10,
+        "usage": "Limita chiamate snapshot simultanee durante bootstrap"
+      },
+      "retry_logic": {
+        "location": "HyperliquidClient.fetch_orderbook_snapshot",
+        "max_retries": 3,
+        "backoff_strategy": "exponential (1s, 2s, 4s)",
+        "triggers": "status_code=429 o HTTPStatusError con 429"
+      }
+    }
+  },
+  "decisions_made": [
+    "Usato Semaphore con valore default 10 per limitare concorrenza (configurabile via parametro)",
+    "Retry con exponential backoff implementato direttamente in fetch_orderbook_snapshot",
+    "Logging dettagliato per retry/rate_limit per debugging futuro"
+  ],
+  "decisions_deferred": [
+    "Configurazione dinamica del Semaphore basata su rate limit API (se disponibile)",
+    "Metriche avanzate per monitorare rate limiting"
+  ],
+  "notes": [
+    "Fix implementato con successo: nessun errore 429 durante test.",
+    "Il Semaphore limita efficacemente la concorrenza delle chiamate snapshot durante bootstrap.",
+    "Retry con exponential backoff gestisce eventuali 429 che potrebbero verificarsi in condizioni di carico elevato.",
+    "Tutte le chiamate durante il test hanno avuto status_code=200, confermando l'efficacia della soluzione.",
+    "Nessuna modifica a schema DB o logica ranking/livelli (come richiesto)."
+  ]
+}
+

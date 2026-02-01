@@ -1,0 +1,88 @@
+{
+  "session_id": "20260201_184532",
+  "date": "2026-02-01",
+  "phase": "D (dataset & offline analysis)",
+  "micro_step": "D.2 - Export Universe Snapshot (armed but not active)",
+  "actions_performed": [
+    "Creato modulo src/collector/universe_export.py con logica export snapshot 24h",
+    "Aggiunto comando CLI export-universe-snapshot in src/cli.py con tutti gli argomenti richiesti",
+    "Implementato verifica window 24h con check min-window-hours (default 24h)",
+    "Implementato export raw CSV con streaming (chunked, no full load in RAM)",
+    "Implementato export top levels CSV con aggregazione per symbol_raw (ultimo record)",
+    "Implementato export report JSON con tutte le metriche richieste",
+    "Implementato retry su database locked (3 tentativi con backoff 0.2/0.5/1.0s)",
+    "Testato: skip quando window < 24h, export con --force funziona correttamente"
+  ],
+  "data_analyzed": [
+    "Test 1: window=4.53h < 24h -> export skipped correttamente",
+    "Test 2: con --force -> export completato: 259740 raw rows, 400 top levels rows",
+    "File creati: *_raw.csv (29M), *_top_levels.csv (24K), *_report.json (605 bytes)",
+    "Nessun errore database locked durante test (retry non necessario ma implementato)"
+  ],
+  "results": {
+    "files_created": [
+      "src/collector/universe_export.py (nuovo modulo export)",
+      "src/cli.py (modificato - aggiunto comando export-universe-snapshot)"
+    ],
+    "test_results": {
+      "test_1_skip": {
+        "command": "export-universe-snapshot --min-window-hours 24",
+        "window_hours": 4.53,
+        "result": "NOT READY (window=4.53h < 24.00h), export skipped",
+        "files_created": 0,
+        "status": "PASS"
+      },
+      "test_2_force": {
+        "command": "export-universe-snapshot --min-window-hours 24 --force",
+        "window_hours": 4.57,
+        "result": "Export completed: 259740 raw rows, 400 top levels rows",
+        "files_created": 3,
+        "raw_csv_rows": 259740,
+        "top_levels_csv_rows": 400,
+        "status": "PASS"
+      }
+    },
+    "export_artifacts": {
+      "raw_csv": {
+        "filename_pattern": "universe_24h_<YYYYMMDD_HHMMSS>_raw.csv",
+        "columns": "Tutte le colonne di market_samples (18 colonne)",
+        "streaming": true,
+        "chunk_size": 1000
+      },
+      "top_levels_csv": {
+        "filename_pattern": "universe_24h_<YYYYMMDD_HHMMSS>_top_levels.csv",
+        "columns": "symbol_raw, market_type, base, quote, variant, level, score, spread_bps, volume_24h_usd, open_interest_usd",
+        "aggregation": "Ultimo record per symbol_raw (max ts_ms)",
+        "ordering": "score DESC NULLS LAST",
+        "limit": "top_n (default 400)"
+      },
+      "report_json": {
+        "filename_pattern": "universe_24h_<YYYYMMDD_HHMMSS>_report.json",
+        "fields": "timestamp_export, db_path, table, min_ts_ms, max_ts_ms, window_hours, rows_exported_raw, rows_distinct_markets, null_rates, markets_by_level, force"
+      }
+    }
+  },
+  "decisions_made": [
+    "Usato SQLAlchemy per query (coerente con resto del progetto)",
+    "Streaming CSV con chunked query (1000 rows per chunk) per evitare full load in RAM",
+    "Retry su database locked: 3 tentativi con backoff 0.2/0.5/1.0s",
+    "Export solo se window >= min_window_hours (o --force)",
+    "Output directory: exports/universe_snapshots/ (creata se non esiste)",
+    "Formato CSV unico (no parquet per evitare dipendenze extra)"
+  ],
+  "decisions_deferred": [
+    "Supporto per altri formati (parquet, JSON lines) se necessario in futuro",
+    "Compressione automatica dei CSV per risparmiare spazio"
+  ],
+  "notes": [
+    "Export snapshot 24h implementato e testato con successo.",
+    "Comando safe da eseguire mentre collector è in run: solo lettura, retry su lock.",
+    "Test 1 (skip): funziona correttamente, non crea file se window < 24h.",
+    "Test 2 (force): funziona correttamente, crea tutti e 3 i file richiesti.",
+    "Export streaming: 259740 rows processate senza problemi di memoria.",
+    "Report JSON completo con tutte le metriche richieste (null_rates, markets_by_level, etc.).",
+    "Nessuna modifica a scanner esistenti o logica collector (come richiesto).",
+    "Nessuna modifica a README/ROADMAP/DECISIONS/PROTOCOL (come richiesto)."
+  ]
+}
+

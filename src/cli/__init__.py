@@ -20,6 +20,7 @@ from src.arb.triangular_scanner import TriangularScanner
 from src.arb.paper_trader import PaperTrader
 from src.arb.profit_persistence import ProfitRecorder, save_profit_opportunity_async
 from src.utils.session_scope import session_scope
+from src.collector.universe_raw_collector import UniverseRawCollector
 
 app = typer.Typer(add_completion=False)
 logger = get_logger(__name__)
@@ -254,6 +255,36 @@ def analyze_run(run_id: str = typer.Option(..., help="Run ID"), config_path: str
     setup_logging(settings.logging)
     result = generate_report(run_id, output_dir)
     typer.echo(f"Report written to {result['report_path']}, recommendations to {result['recommendations_path']}")
+
+
+@app.command()
+def run_universe_collector(
+    cleanup_sec: float = typer.Option(300.0, help="Cleanup interval in seconds"),
+    duration_sec: Optional[float] = typer.Option(None, help="Duration limit in seconds (optional)"),
+    ranking_refresh_sec: Optional[float] = typer.Option(None, help="Ranking refresh interval (not implemented in workpack1)"),
+    config_path: str = typer.Option("config/config.yaml", help="Path to config"),
+):
+    """Run the universe raw collector."""
+    settings = load_config(config_path)
+    setup_logging(settings.logging)
+    init_db(settings)
+
+    if ranking_refresh_sec:
+        logger.info("[CLI] ranking_refresh_sec=%s (not implemented in workpack1)", ranking_refresh_sec)
+
+    async def _run():
+        client = HyperliquidClient(settings.api, settings.network)
+        collector = UniverseRawCollector(settings, client)
+        try:
+            await collector.run(
+                cleanup_sec=cleanup_sec,
+                duration_sec=duration_sec,
+                ranking_refresh_sec=ranking_refresh_sec,
+            )
+        finally:
+            await client.close()
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

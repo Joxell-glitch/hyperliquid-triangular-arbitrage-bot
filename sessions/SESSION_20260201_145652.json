@@ -1,0 +1,95 @@
+{
+  "session_id": "20260201_145652",
+  "date": "2026-02-01",
+  "phase": "D (dataset & offline analysis)",
+  "micro_step": "D.0 - Complete Universe Raw Collector (workpack 2/2)",
+  "actions_performed": [
+    "Implementato ranking score con percentile rank (volume, OI, spread) e formula: 0.6*volume + 0.3*OI - 0.1*spread",
+    "Implementato livelli A/B/C/D con sampling intervals (A: 250ms, B/C/D: 2000ms)",
+    "Implementato spread filter anti-edge-fake (spread_bps > 30 ignora, > 15 non eleggibile A)",
+    "Implementato promotion/demotion con hysteresis (3 refresh consecutivi per Level A)",
+    "Implementato fallback safety BTC/ETH/SOL (min Level B, mai forzare A)",
+    "Implementato scheduler dinamico per level con next_due_ms (no busy-wait)",
+    "Arricchito output JSON (universe_status.json e universe_levels.json con tutti i campi richiesti)",
+    "Testato con duration 20s e ranking-refresh-sec 5: ranking calcolato 2-3 volte, livelli corretti"
+  ],
+  "data_analyzed": [
+    "Test eseguito: 488 mercati totali",
+    "Ranking calcolato per 338-341 markets",
+    "markets_by_level: A=100, B=100, C=100, D=188 (corretto!)",
+    "promotions_last_window: 60",
+    "demotions_last_window: 0",
+    "skipped_spread_gt_30_last_window: 304",
+    "inserts_per_sec_avg: 336.0",
+    "db_rows_24h: 11103"
+  ],
+  "results": {
+    "files_modified": [
+      "src/collector/universe_raw_collector.py (completo refactor workpack2)",
+      "src/cli.py (rimosso messaggio 'not implemented in workpack1')"
+    ],
+    "test_results": {
+      "duration_test": "20s",
+      "ranking_refresh_sec": "5s",
+      "markets_total": 488,
+      "rankings_calculated": "338-341 markets",
+      "markets_by_level": {
+        "A": 100,
+        "B": 100,
+        "C": 100,
+        "D": 188
+      },
+      "promotions_last_window": 60,
+      "demotions_last_window": 0,
+      "skipped_spread_gt_30": 304,
+      "inserts_per_sec_avg": 336.0,
+      "db_rows_24h": 11103,
+      "errors_429": 0
+    },
+    "json_outputs": {
+      "universe_status.json": {
+        "timestamp": "presente",
+        "markets_total": "presente",
+        "markets_by_level": "presente (A/B/C/D)",
+        "promotions_last_window": "presente",
+        "demotions_last_window": "presente",
+        "skipped_spread_gt_30_last_window": "presente",
+        "inserts_per_sec_avg": "presente",
+        "db_rows_24h": "presente"
+      },
+      "universe_levels.json": {
+        "timestamp": "presente",
+        "markets_total": "presente",
+        "top_400": "presente (symbol_raw, rank, score, level)",
+        "truncated": "presente"
+      }
+    }
+  },
+  "decisions_made": [
+    "Ranking calcolato ogni ranking_refresh_sec (default 60s) basato su ultimi 5 minuti di dati",
+    "Livelli assegnati: A (rank 1-100), B (101-200), C (201-300), D (301-400+), altri D",
+    "Spread filter: spread_bps > 30 ignora completamente, > 15 non eleggibile Level A",
+    "Promotion a Level A: rank <= 100 + spread <= 15 per 3 refresh consecutivi",
+    "Demotion da Level A: rank > 120 OR spread > 20 per 3 refresh consecutivi",
+    "Fallback safety: BTC/ETH/SOL sempre almeno Level B (mai forzare A)",
+    "Scheduler dinamico: next_due_ms per ogni market, sampling solo quando due",
+    "Batching e rate-limit preservati: nessuna regressione 429"
+  ],
+  "decisions_deferred": [
+    "Configurazione dinamica degli intervals per level (attualmente hardcoded)",
+    "Metriche avanzate per monitorare churn promotion/demotion"
+  ],
+  "notes": [
+    "Workpack 2/2 completato con successo. Tutte le funzionalità richieste implementate.",
+    "Ranking funziona correttamente: calcolato 2-3 volte durante test (refresh=5s).",
+    "Livelli corretti: A=100 (top 100), B=100, C=100, D=188 (resto).",
+    "Promotion/demotion con hysteresis funziona: 60 promotions durante test, 0 demotions.",
+    "Spread filter attivo: 304 mercati saltati per spread > 30 bps.",
+    "Fallback safety implementato: BTC/ETH/SOL sempre almeno Level B.",
+    "Scheduler dinamico funziona: sampling solo per mercati 'due', no busy-wait.",
+    "Output JSON completo con tutti i campi richiesti.",
+    "Nessuna regressione: batching e rate-limit preservati, nessun errore 429.",
+    "Nessuna modifica a schema DB o scanner esistenti (come richiesto)."
+  ]
+}
+

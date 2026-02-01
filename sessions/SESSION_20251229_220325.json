@@ -1,0 +1,69 @@
+{
+  "session_id": "20260201_seed_from_gpt_chats",
+  "date": "2026-02-01",
+  "phase": "D (dataset & offline analysis) / preparazione C1 (decision rule)",
+  "micro_step": "D.0 seed: definire baseline evidenze + requisiti collector",
+  "actions_performed": [
+    "Raccolta e consolidamento di 2 conversazioni GPT esterne come contesto iniziale (seed) per SESSION log"
+  ],
+  "data_analyzed": [
+    "Dataset analizzato su DB sqlite (estratto): 61.875 righe, ~11 ore, opportunità spot-perp concentrate su BTC/ETH",
+    "Output ranking/threshold: p90 edge_realistico globale ≈ 0.01126792 (≈1.1268%) con buffer realism ≈ 0.00128601",
+    "Discussione architettura: rolling window 8–24h (preferenza 24h), feature light per tutti i mercati, raw pesante solo on-demand"
+  ],
+  "results": {
+    "dataset_summary": {
+      "db": "data/arb_bot.sqlite (da chat esterna)",
+      "rows_total": 61875,
+      "time_range_utc": "2025-12-27 18:18:06 -> 2025-12-28 05:10:03",
+      "buffer_realism": 0.00128601,
+      "opportunities_after_buffer": 58986,
+      "trade_grade_threshold_p90_global_edge_realistico": 0.01126792
+    },
+    "top_assets_by_score": [
+      {
+        "asset": "BTC",
+        "hit_rate": 0.918812,
+        "events_per_hour": 3008.976172,
+        "avg_edge_realistico": 0.006085,
+        "p50_edge_realistico": 0.005562,
+        "p90_edge_realistico": 0.011838,
+        "max_edge_realistico": 0.031203,
+        "score": 33.450739
+      },
+      {
+        "asset": "ETH",
+        "hit_rate": 1.0,
+        "events_per_hour": 2419.605216,
+        "avg_edge_realistico": 0.005067,
+        "p50_edge_realistico": 0.003821,
+        "p90_edge_realistico": 0.010623,
+        "max_edge_realistico": 0.041027,
+        "score": 25.702993
+      }
+    ],
+    "edge_hypothesis": [
+      "Edge osservato: Spot–Perp dislocation (basis micro-inefficiency), non triangolare",
+      "Filtro iniziale proposto (da chat esterna): edge_realistico >= 0.8% e spread_gross <= 0.10% per una versione minima"
+    ],
+    "infra_notes": {
+      "rolling_window_recommended_hours": 24,
+      "strategy_data_policy": "feature light per universo; L2/trades raw solo on-demand per candidati",
+      "storage_expectation": "pochi GB totali con feature light e rolling 24h (ordine di grandezza)"
+    }
+  },
+  "decisions_made": [
+    "Usare questo SESSION seed come punto di partenza ufficiale per continuità (anche se non contiene ancora attività su filesystem)",
+    "Assumere come evidenza preliminare che BTC/ETH dominano l'edge spot-perp nel dataset analizzato (da verificare con collector canonico)",
+    "Confermare direzione architetturale: collector universale feature-light + rolling window 24h + raw on-demand"
+  ],
+  "decisions_deferred": [
+    "Conferma numerica in ambiente canonico (VM/repo) ripetendo estrazione e metriche su dataset generato dal collector",
+    "Definizione definitiva di 'decision rule' (C1) vs priorità 'collector' (D.0) per allineamento ROADMAP",
+    "Scelta finale su threshold (p90 vs p85/p95 + buffer) e su mix maker/taker (solo paper per ora)"
+  ],
+  "notes": [
+    "Questo SESSION è un seed: non include commit, file modificati o comandi eseguiti nel repo.",
+    "Possibile ambiguità di roadmap: README indica fase D attiva (dataset), mentre il contenuto delle chat esterne spinge anche verso C1 (decision rule). Verrà risolta nei prossimi step con i file canonici e lo stato del repo."
+  ]
+}

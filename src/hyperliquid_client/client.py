@@ -88,6 +88,8 @@ class HyperliquidClient:
         self._payload_type_warned = False
         self._spot_meta_cache: Optional[Any] = None
         self._spot_meta_cache_time: float = 0.0
+        self._perp_meta_ctxs_cache: Optional[Any] = None
+        self._perp_meta_ctxs_cache_time: float = 0.0
         self._connected_event_market = None
         self._connected_event_books = None
         if self._connected_event_books is not None:
@@ -234,6 +236,25 @@ class HyperliquidClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def fetch_perp_meta_and_asset_ctxs(self, use_cache: bool = True) -> Dict[str, Any]:
+        """
+        Fetch perp market metadata and asset contexts (OI, funding) from Hyperliquid.
+
+        Uses the \"metaAndAssetCtxs\" request type which includes:
+        - universe: perp contracts metadata
+        - assetCtxs: asset contexts with open interest, funding rate, etc.
+        """
+        now = time.time()
+        if use_cache and hasattr(self, "_perp_meta_ctxs_cache") and self._perp_meta_ctxs_cache and now - getattr(self, "_perp_meta_ctxs_cache_time", 0) < 60:
+            return self._perp_meta_ctxs_cache
+        url = f"{self.rest_base}{self.api_settings.info_path}"
+        resp = await self._session.post(url, json={"type": "metaAndAssetCtxs"})
+        resp.raise_for_status()
+        data = resp.json()
+        self._perp_meta_ctxs_cache = data
+        self._perp_meta_ctxs_cache_time = now
+        return data
+
     async def fetch_orderbook_snapshot(
         self, coin: str, *, asset: Optional[str] = None, kind: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -247,33 +268,77 @@ class HyperliquidClient:
             kind_label,
             json.dumps(payload, sort_keys=True),
         )
-        resp = await self._session.post(url, json=payload)
-        response_text: Any
-        try:
-            response_text = resp.text
-        except Exception as exc:  # pragma: no cover - defensive
-            response_text = f"<unavailable:{type(exc).__name__}>"
-        snippet: str
-        if isinstance(response_text, str):
-            snippet = response_text[:200]
-        else:
-            snippet = f"<non-str type={type(response_text).__name__} len={len(response_text) if hasattr(response_text, '__len__') else 'na'}>"
-        self._logger.info(
-            "[WS_BOOKS_%s][BOOTSTRAP][DEBUG_SNAPSHOT] kind=%s status_code=%s response=%s",
-            asset_key,
-            kind_label,
-            resp.status_code,
-            snippet,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data is None:
-            self._logger.warning(
-                "[WS_BOOKS_%s][BOOTSTRAP][DEBUG_SNAPSHOT] kind=%s [BOOTSTRAP] snapshot response is null",
-                asset_key,
-                kind_label,
-            )
-        return data
+        
+        # Retry with exponential backoff for 429 Too Many Requests
+        max_retries = 3
+        base_delay = 1.0  # Start with 1 second
+        
+        for attempt in range(max_retries):
+            try:
+                resp = await self._session.post(url, json=payload)
+                response_text: Any
+                try:
+                    response_text = resp.text
+                except Exception as exc:  # pragma: no cover - defensive
+                    response_text = f"<unavailable:{type(exc).__name__}>"
+                snippet: str
+                if isinstance(response_text, str):
+                    snippet = response_text[:200]
+                else:
+                    snippet = f"<non-str type={type(response_text).__name__} len={len(response_text) if hasattr(response_text, '__len__') else 'na'}>"
+                self._logger.info(
+                    "[WS_BOOKS_%s][BOOTSTRAP][DEBUG_SNAPSHOT] kind=%s status_code=%s response=%s",
+                    asset_key,
+                    kind_label,
+                    resp.status_code,
+                    snippet,
+                )
+                
+                # Handle 429 Too Many Requests with retry
+                if resp.status_code == 429:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                        self._logger.warning(
+                            "[WS_BOOKS_%s][BOOTSTRAP][RATE_LIMIT] kind=%s 429 Too Many Requests, retrying in %.1fs (attempt %d/%d)",
+                            asset_key,
+                            kind_label,
+                            delay,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        self._logger.error(
+                            "[WS_BOOKS_%s][BOOTSTRAP][RATE_LIMIT] kind=%s 429 Too Many Requests, max retries reached",
+                            asset_key,
+                            kind_label,
+                        )
+                        resp.raise_for_status()
+                
+                resp.raise_for_status()
+                data = resp.json()
+                if data is None:
+                    self._logger.warning(
+                        "[WS_BOOKS_%s][BOOTSTRAP][DEBUG_SNAPSHOT] kind=%s [BOOTSTRAP] snapshot response is null",
+                        asset_key,
+                        kind_label,
+                    )
+                return data
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self._logger.warning(
+                        "[WS_BOOKS_%s][BOOTSTRAP][RATE_LIMIT] kind=%s 429 exception, retrying in %.1fs (attempt %d/%d)",
+                        asset_key,
+                        kind_label,
+                        delay,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
 
     # Listener registration -------------------------------------------------
 

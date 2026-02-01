@@ -1,0 +1,61 @@
+import json, time, threading, websocket
+
+WS_URL="wss://api.hyperliquid.xyz/ws"
+SPOT="@242"     # STABLE/USDC
+PERP="STABLE"   # perp
+
+st={"s":None,"p":None}
+
+def bb_ba(levels):
+    b=levels[0] if levels else []
+    a=levels[1] if levels and len(levels)>1 else []
+    bb=float(b[0]["px"]) if b else None
+    ba=float(a[0]["px"]) if a else None
+    return bb,ba
+
+def emit():
+    s=st["s"]; p=st["p"]
+    if not s or not p: return
+    if None in (s["bb"],s["ba"],p["bb"],p["ba"]): return
+    ms=(s["bb"]+s["ba"])/2
+    mp=(p["bb"]+p["ba"])/2
+    spr=mp-ms
+    bps=spr/ms*10000
+    now=int(time.time()*1000)
+    print(
+        f"SPOT mid={ms:.6f} age={now-s['t']}ms | "
+        f"PERP mid={mp:.6f} age={now-p['t']}ms | "
+        f"perp-spot={spr:.6f} ({bps:.2f} bps)"
+    )
+
+def on_open(ws):
+    ws.send(json.dumps({"method":"subscribe","subscription":{"type":"l2Book","coin":SPOT}}))
+    ws.send(json.dumps({"method":"subscribe","subscription":{"type":"l2Book","coin":PERP}}))
+    print(f"SUBMITTED spot={SPOT} perp={PERP}")
+
+def on_message(ws,msg):
+    j=json.loads(msg)
+    if j.get("channel")!="l2Book": return
+    d=j["data"]; c=d["coin"]; t=d["time"]; lv=d["levels"]
+    bb,ba=bb_ba(lv)
+    if c==SPOT: st["s"]={"t":t,"bb":bb,"ba":ba}
+    elif c==PERP: st["p"]={"t":t,"bb":bb,"ba":ba}
+    emit()
+
+def on_error(ws,e): print("ERROR",repr(e))
+def on_close(ws,c,m): print("CLOSE",c,m)
+
+ws=websocket.WebSocketApp(
+    WS_URL,
+    on_open=on_open,
+    on_message=on_message,
+    on_error=on_error,
+    on_close=on_close
+)
+threading.Thread(
+    target=ws.run_forever,
+    kwargs={"ping_interval":20,"ping_timeout":10},
+    daemon=True
+).start()
+
+time.sleep(20)

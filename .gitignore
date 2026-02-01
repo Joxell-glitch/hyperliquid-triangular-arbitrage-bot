@@ -29,3 +29,20 @@ config/*.bak*
 # Local-only artifacts
 /METTI_QUI_IL_PATH_DEL_DB
 /hyperliquid-bot-src.tgz
+
+# runtime/output
+SESSION_*.json
+*.json
+*.csv
+SELECT
+FROM
+WHERE
+AND
+LIMIT
+ORDER
+asset,*
+fees_*
+profit_*
+slippage_*
+timestamp*
+ts*
